@@ -1,0 +1,372 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A00000000000000000000001 /* LumaDeskApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000101 /* LumaDeskApp.swift */; };
+		A00000000000000000000002 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000102 /* AppDelegate.swift */; };
+		A00000000000000000000003 /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000103 /* MenuBarController.swift */; };
+		A00000000000000000000010 /* SettingsWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000111 /* SettingsWindowController.swift */; };
+		A00000000000000000000004 /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000104 /* AppContainer.swift */; };
+		A00000000000000000000005 /* AppStateStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000105 /* AppStateStore.swift */; };
+		A00000000000000000000006 /* AppModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000106 /* AppModels.swift */; };
+		A00000000000000000000007 /* SystemServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000107 /* SystemServices.swift */; };
+		A00000000000000000000008 /* BLEDeviceManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000108 /* BLEDeviceManager.swift */; };
+		A00000000000000000000009 /* ELKBLEDOMBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000109 /* ELKBLEDOMBackend.swift */; };
+		A0000000000000000000000A /* ScreenCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010A /* ScreenCaptureService.swift */; };
+		A0000000000000000000000B /* ColorAnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010B /* ColorAnalysisService.swift */; };
+		A0000000000000000000000C /* DynamicLightingEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010C /* DynamicLightingEngine.swift */; };
+		A0000000000000000000000D /* Controls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010D /* Controls.swift */; };
+		A0000000000000000000000E /* PopoverRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010E /* PopoverRootView.swift */; };
+		A0000000000000000000000F /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010F /* SettingsRootView.swift */; };
+		A00000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000112 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A00000000000000000000100 /* LumaDesk.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LumaDesk.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000101 /* LumaDeskApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumaDeskApp.swift; sourceTree = "<group>"; };
+		A00000000000000000000102 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		A00000000000000000000103 /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
+		A00000000000000000000111 /* SettingsWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowController.swift; sourceTree = "<group>"; };
+		A00000000000000000000104 /* AppContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
+		A00000000000000000000105 /* AppStateStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000106 /* AppModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModels.swift; sourceTree = "<group>"; };
+		A00000000000000000000107 /* SystemServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemServices.swift; sourceTree = "<group>"; };
+		A00000000000000000000108 /* BLEDeviceManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BLEDeviceManager.swift; sourceTree = "<group>"; };
+		A00000000000000000000109 /* ELKBLEDOMBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ELKBLEDOMBackend.swift; sourceTree = "<group>"; };
+		A0000000000000000000010A /* ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenCaptureService.swift; sourceTree = "<group>"; };
+		A0000000000000000000010B /* ColorAnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColorAnalysisService.swift; sourceTree = "<group>"; };
+		A0000000000000000000010C /* DynamicLightingEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicLightingEngine.swift; sourceTree = "<group>"; };
+		A0000000000000000000010D /* Controls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Controls.swift; sourceTree = "<group>"; };
+		A0000000000000000000010E /* PopoverRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverRootView.swift; sourceTree = "<group>"; };
+		A0000000000000000000010F /* SettingsRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRootView.swift; sourceTree = "<group>"; };
+		A00000000000000000000110 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A00000000000000000000112 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00000000000000000000200 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00000000000000000000300 = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000301 /* LumaDesk */,
+				A00000000000000000000302 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A00000000000000000000301 /* LumaDesk */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000303 /* App */,
+				A00000000000000000000304 /* Architecture */,
+				A00000000000000000000305 /* Models */,
+				A00000000000000000000306 /* Services */,
+				A00000000000000000000307 /* UI */,
+				A0000000000000000000030E /* Resources */,
+				A00000000000000000000110 /* Info.plist */,
+			);
+			name = LumaDesk;
+			path = LumaDesk;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000302 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000100 /* LumaDesk.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000303 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000101 /* LumaDeskApp.swift */,
+				A00000000000000000000102 /* AppDelegate.swift */,
+				A00000000000000000000103 /* MenuBarController.swift */,
+				A00000000000000000000111 /* SettingsWindowController.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000304 /* Architecture */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000104 /* AppContainer.swift */,
+				A00000000000000000000105 /* AppStateStore.swift */,
+			);
+			path = Architecture;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000305 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000106 /* AppModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000306 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000107 /* SystemServices.swift */,
+				A00000000000000000000308 /* BLE */,
+				A00000000000000000000309 /* Capture */,
+				A0000000000000000000030A /* Lighting */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000307 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000030B /* Components */,
+				A0000000000000000000030C /* Popover */,
+				A0000000000000000000030D /* Settings */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000308 /* BLE */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000108 /* BLEDeviceManager.swift */,
+				A00000000000000000000109 /* ELKBLEDOMBackend.swift */,
+			);
+			path = BLE;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000309 /* Capture */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000010A /* ScreenCaptureService.swift */,
+			);
+			path = Capture;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000030A /* Lighting */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000010B /* ColorAnalysisService.swift */,
+				A0000000000000000000010C /* DynamicLightingEngine.swift */,
+			);
+			path = Lighting;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000030B /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000010D /* Controls.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000030C /* Popover */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000010E /* PopoverRootView.swift */,
+			);
+			path = Popover;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000030D /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				A0000000000000000000010F /* SettingsRootView.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		A0000000000000000000030E /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000112 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00000000000000000000400 /* LumaDesk */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000600 /* Build configuration list for PBXNativeTarget "LumaDesk" */;
+			buildPhases = (
+				A00000000000000000000500 /* Sources */,
+				A00000000000000000000200 /* Frameworks */,
+				A00000000000000000000501 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LumaDesk;
+			productName = LumaDesk;
+			productReference = A00000000000000000000100 /* LumaDesk.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000401 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = A00000000000000000000601 /* Build configuration list for PBXProject "LumaDesk" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A00000000000000000000300;
+			productRefGroup = A00000000000000000000302 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A00000000000000000000400 /* LumaDesk */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00000000000000000000501 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000011 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00000000000000000000500 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000001 /* LumaDeskApp.swift in Sources */,
+				A00000000000000000000002 /* AppDelegate.swift in Sources */,
+				A00000000000000000000003 /* MenuBarController.swift in Sources */,
+				A00000000000000000000010 /* SettingsWindowController.swift in Sources */,
+				A00000000000000000000004 /* AppContainer.swift in Sources */,
+				A00000000000000000000005 /* AppStateStore.swift in Sources */,
+				A00000000000000000000006 /* AppModels.swift in Sources */,
+				A00000000000000000000007 /* SystemServices.swift in Sources */,
+				A00000000000000000000008 /* BLEDeviceManager.swift in Sources */,
+				A00000000000000000000009 /* ELKBLEDOMBackend.swift in Sources */,
+				A0000000000000000000000A /* ScreenCaptureService.swift in Sources */,
+				A0000000000000000000000B /* ColorAnalysisService.swift in Sources */,
+				A0000000000000000000000C /* DynamicLightingEngine.swift in Sources */,
+				A0000000000000000000000D /* Controls.swift in Sources */,
+				A0000000000000000000000E /* PopoverRootView.swift in Sources */,
+				A0000000000000000000000F /* SettingsRootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000000700 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LumaDesk/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jinsukwak.LumaDesk;
+				PRODUCT_NAME = LumaDesk;
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000000701 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LumaDesk/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jinsukwak.LumaDesk;
+				PRODUCT_NAME = LumaDesk;
+				SDKROOT = macosx;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A00000000000000000000702 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+			};
+			name = Debug;
+		};
+		A00000000000000000000703 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00000000000000000000600 /* Build configuration list for PBXNativeTarget "LumaDesk" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000700 /* Debug */,
+				A00000000000000000000701 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000601 /* Build configuration list for PBXProject "LumaDesk" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000702 /* Debug */,
+				A00000000000000000000703 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A00000000000000000000401 /* Project object */;
+}
