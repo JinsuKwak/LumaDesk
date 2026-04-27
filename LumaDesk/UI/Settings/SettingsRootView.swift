@@ -5,6 +5,7 @@ private enum SettingsTab: Hashable {
     case dynamic
     case calibration
     case device
+    case displays
 }
 
 struct SettingsRootView: View {
@@ -28,6 +29,10 @@ struct SettingsRootView: View {
             devicePane
                 .tabItem { Label("Device", systemImage: "dot.radiowaves.left.and.right") }
                 .tag(SettingsTab.device)
+
+            displaysPane
+                .tabItem { Label("Displays", systemImage: "display") }
+                .tag(SettingsTab.displays)
         }
         .frame(minWidth: 660, minHeight: 560)
         .padding(.top, 10)
@@ -414,6 +419,68 @@ struct SettingsRootView: View {
         .padding()
     }
 
+    private var displaysPane: some View {
+        Form {
+            Section("Sync") {
+                Toggle(
+                    "Sync external display brightness to built-in display",
+                    isOn: Binding(
+                        get: { appState.preferences.displaySync.isEnabled },
+                        set: appState.setDisplaySyncEnabled
+                    )
+                )
+
+                settingsSlider(
+                    title: "Polling",
+                    valueText: "\(appState.preferences.displaySync.pollingRateHz.formatted(.number.precision(.fractionLength(1)))) Hz",
+                    value: Binding(
+                        get: { appState.preferences.displaySync.pollingRateHz },
+                        set: appState.setDisplaySyncPollingRate
+                    ),
+                    range: 1 ... 10,
+                    step: 0.5
+                )
+                .disabled(!appState.preferences.displaySync.isEnabled)
+
+                LabeledContent("Source") {
+                    Text(appState.displaySyncSourceStatus)
+                        .foregroundStyle(sourceStatusColor(appState.displaySyncSourceStatus))
+                }
+
+                HStack {
+                    Text("Display attach/detach is event-based. Polling only watches built-in brightness.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button("Refresh") {
+                        appState.refreshDisplaySync()
+                    }
+                    .disabled(!appState.preferences.displaySync.isEnabled)
+                }
+            }
+
+            Section("Monitors") {
+                if appState.displaySyncSnapshots.isEmpty {
+                    Text(appState.preferences.displaySync.isEnabled ? "No external displays found." : "Enable sync to scan displays.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(appState.displaySyncSnapshots) { snapshot in
+                        displaySyncRow(snapshot)
+                    }
+                }
+            }
+
+            Section("Backend") {
+                Text("Uses a vendored minimal AppleSiliconDDC path for DDC/CI luminance writes. Unsupported displays stay visible for this app session only.")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+    }
+
     private func permissionRow(title: String, granted: Bool, actionTitle: String, action: @escaping () -> Void) -> some View {
         HStack {
             Text(title)
@@ -478,6 +545,54 @@ struct SettingsRootView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func displaySyncRow(_ snapshot: DisplaySyncSnapshot) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "display")
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(snapshot.name)
+                    .font(.system(size: 13, weight: .medium))
+
+                if let lastBrightnessPercent = snapshot.lastBrightnessPercent {
+                    Text(lastBrightnessPercent.formatted(.percent.precision(.fractionLength(0))))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Not synced")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Spacer()
+
+            Circle()
+                .fill(snapshot.state.tint)
+                .frame(width: 8, height: 8)
+
+            Text(snapshot.state.label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 92, alignment: .trailing)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func sourceStatusColor(_ status: String) -> Color {
+        if status == "Off" || status == "Scanning" {
+            return .secondary
+        }
+
+        if status.hasPrefix("Built-in") {
+            return .green
+        }
+
+        return .orange
     }
 
     private func rgbText(_ color: RGBColor) -> String {

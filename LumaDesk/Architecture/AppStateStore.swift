@@ -6,6 +6,8 @@ final class AppStateStore: ObservableObject {
     @Published private(set) var preferences: AppPreferences
     @Published private(set) var connectionState: ConnectionState = .disconnected
     @Published private(set) var captureDiagnostics = CaptureDiagnostics()
+    @Published private(set) var displaySyncSnapshots: [DisplaySyncSnapshot] = []
+    @Published private(set) var displaySyncSourceStatus = "Off"
     @Published private(set) var permissionState = PermissionState()
     @Published var launchAtLoginError: String?
 
@@ -15,6 +17,7 @@ final class AppStateStore: ObservableObject {
     private let bleDeviceManager: BLEDeviceManager
     private let dynamicLightingEngine: DynamicLightingEngine
     private let centerRegionSelectionService: CenterRegionSelectionService
+    private let displaySyncService: DisplaySyncService
 
     private var didBootstrap = false
     private var pendingStaticOutputTask: Task<Void, Never>?
@@ -27,7 +30,8 @@ final class AppStateStore: ObservableObject {
         launchAtLoginService: LaunchAtLoginService,
         bleDeviceManager: BLEDeviceManager,
         dynamicLightingEngine: DynamicLightingEngine,
-        centerRegionSelectionService: CenterRegionSelectionService
+        centerRegionSelectionService: CenterRegionSelectionService,
+        displaySyncService: DisplaySyncService
     ) {
         self.preferencesStore = preferencesStore
         self.permissionService = permissionService
@@ -35,6 +39,7 @@ final class AppStateStore: ObservableObject {
         self.bleDeviceManager = bleDeviceManager
         self.dynamicLightingEngine = dynamicLightingEngine
         self.centerRegionSelectionService = centerRegionSelectionService
+        self.displaySyncService = displaySyncService
         self.preferences = preferencesStore.load()
 
         bleDeviceManager.connectionStateHandler = { [weak self] state in
@@ -56,6 +61,14 @@ final class AppStateStore: ObservableObject {
 
         dynamicLightingEngine.outputHandler = { [weak self] color in
             self?.sendDynamicColor(color)
+        }
+
+        displaySyncService.snapshotsHandler = { [weak self] snapshots in
+            self?.displaySyncSnapshots = snapshots
+        }
+
+        displaySyncService.statusHandler = { [weak self] status in
+            self?.displaySyncSourceStatus = status
         }
     }
 
@@ -113,6 +126,7 @@ final class AppStateStore: ObservableObject {
         }
 
         bleDeviceManager.start()
+        displaySyncService.configure(preferences.displaySync)
         applyStartupBehavior()
     }
 
@@ -449,6 +463,22 @@ final class AppStateStore: ObservableObject {
         bleDeviceManager.disconnect()
     }
 
+    func setDisplaySyncEnabled(_ enabled: Bool) {
+        preferences.displaySync.isEnabled = enabled
+        persist()
+        displaySyncService.configure(preferences.displaySync)
+    }
+
+    func setDisplaySyncPollingRate(_ value: Double) {
+        preferences.displaySync.pollingRateHz = value.clamped(to: 1 ... 10)
+        persist()
+        displaySyncService.configure(preferences.displaySync)
+    }
+
+    func refreshDisplaySync() {
+        displaySyncService.refreshNow()
+    }
+
     func restartDynamicCapture() {
         preferences.lightingMode = .dynamic
         preferences.whiteOverrideEnabled = false
@@ -467,6 +497,7 @@ final class AppStateStore: ObservableObject {
     func handleSystemSleep() {
         wakeLightingTask?.cancel()
         wakeLightingTask = nil
+        displaySyncService.handleSystemSleep()
 
         guard preferences.general.autoTurnOff else { return }
         turnLightOff(preservingIntent: preferences.general.autoTurnOn)
@@ -474,6 +505,7 @@ final class AppStateStore: ObservableObject {
 
     func handleSystemWake() {
         bleDeviceManager.handleSystemWake()
+        displaySyncService.handleSystemWake()
         wakeLightingTask?.cancel()
 
         guard preferences.general.autoTurnOn else { return }

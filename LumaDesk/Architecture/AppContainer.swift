@@ -12,6 +12,7 @@ final class AppContainer {
     let colorAnalysisService: ColorAnalysisService
     let dynamicLightingEngine: DynamicLightingEngine
     let centerRegionSelectionService: CenterRegionSelectionService
+    let displaySyncService: DisplaySyncService
     let appState: AppStateStore
 
     private init() {
@@ -22,6 +23,7 @@ final class AppContainer {
         screenCaptureService = ScreenCaptureService()
         colorAnalysisService = ColorAnalysisService()
         centerRegionSelectionService = CenterRegionSelectionService()
+        displaySyncService = DisplaySyncService()
         dynamicLightingEngine = DynamicLightingEngine(
             captureService: screenCaptureService,
             analyzer: colorAnalysisService
@@ -32,7 +34,8 @@ final class AppContainer {
             launchAtLoginService: launchAtLoginService,
             bleDeviceManager: bleDeviceManager,
             dynamicLightingEngine: dynamicLightingEngine,
-            centerRegionSelectionService: centerRegionSelectionService
+            centerRegionSelectionService: centerRegionSelectionService,
+            displaySyncService: displaySyncService
         )
     }
 }

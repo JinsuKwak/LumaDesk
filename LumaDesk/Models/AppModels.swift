@@ -431,6 +431,24 @@ struct BLESettings: Codable, Equatable {
     var autoReconnect: Bool = true
 }
 
+struct DisplaySyncSettings: Codable, Equatable {
+    var isEnabled: Bool = false
+    var pollingRateHz: Double = 2
+
+    enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case pollingRateHz
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
+        pollingRateHz = (try container.decodeIfPresent(Double.self, forKey: .pollingRateHz) ?? 2).clamped(to: 1 ... 10)
+    }
+}
+
 struct AppPreferences: Codable, Equatable {
     var lightingMode: LightingMode = .dynamic
     var dynamicAnalysisMode: DynamicAnalysisMode = .full
@@ -443,6 +461,7 @@ struct AppPreferences: Codable, Equatable {
     var calibration: CalibrationSettings = .init()
     var sceneRules: SceneRuleSettings = .init()
     var ble: BLESettings = .init()
+    var displaySync: DisplaySyncSettings = .init()
 
     enum CodingKeys: String, CodingKey {
         case lightingMode
@@ -456,6 +475,7 @@ struct AppPreferences: Codable, Equatable {
         case calibration
         case sceneRules
         case ble
+        case displaySync
     }
 
     init() {}
@@ -482,12 +502,60 @@ struct AppPreferences: Codable, Equatable {
         }
         sceneRules = try container.decodeIfPresent(SceneRuleSettings.self, forKey: .sceneRules) ?? .init()
         ble = try container.decodeIfPresent(BLESettings.self, forKey: .ble) ?? .init()
+        displaySync = try container.decodeIfPresent(DisplaySyncSettings.self, forKey: .displaySync) ?? .init()
     }
 }
 
 struct PermissionState: Equatable {
     var bluetoothAuthorized: Bool = false
     var screenRecordingAuthorized: Bool = false
+}
+
+enum DisplaySyncDisplayState: Equatable {
+    case disabled
+    case ready
+    case connected
+    case syncing
+    case disconnected
+    case unsupported
+    case error(String)
+
+    var label: String {
+        switch self {
+        case .disabled: "Disabled"
+        case .ready: "Ready"
+        case .connected: "Synced"
+        case .syncing: "Syncing"
+        case .disconnected: "Disconnected"
+        case .unsupported: "Unsupported"
+        case .error(let message): "Error \(message)"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .connected:
+            .green
+        case .ready:
+            .secondary
+        case .syncing:
+            .orange
+        case .disconnected, .error:
+            .red
+        case .unsupported:
+            .orange
+        case .disabled:
+            .secondary
+        }
+    }
+}
+
+struct DisplaySyncSnapshot: Equatable, Identifiable {
+    var id: String
+    var name: String
+    var state: DisplaySyncDisplayState
+    var lastBrightnessPercent: Double?
+    var lastSeen: Date?
 }
 
 struct CaptureDiagnostics: Equatable {
