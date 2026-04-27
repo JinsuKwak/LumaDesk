@@ -5,6 +5,7 @@ protocol LEDStripBackend: AnyObject {
     func start()
     func stop()
     func restartScan()
+    func handleSystemWake()
     func disconnect()
     func updateDeviceNamePrefix(_ prefix: String)
     func setAutoReconnect(_ enabled: Bool)
@@ -42,6 +43,10 @@ final class BLEDeviceManager {
 
     func restartScan() {
         backend.restartScan()
+    }
+
+    func handleSystemWake() {
+        backend.handleSystemWake()
     }
 
     func disconnect() {
@@ -84,6 +89,10 @@ final class MockLEDStripBackend: LEDStripBackend {
     func stop() {}
 
     func restartScan() {
+        connectionStateHandler?(.connected("Mock Strip"))
+    }
+
+    func handleSystemWake() {
         connectionStateHandler?(.connected("Mock Strip"))
     }
 

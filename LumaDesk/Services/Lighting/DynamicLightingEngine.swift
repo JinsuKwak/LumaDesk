@@ -8,6 +8,7 @@ final class DynamicLightingEngine {
     private let captureService: ScreenCaptureService
     private let analyzer: ColorAnalysisService
     private let queue = DispatchQueue(label: "LumaDesk.DynamicLightingEngine", qos: .userInitiated)
+    private let frameCoalescingLock = NSLock()
 
     private var isRunning = false
     private var configuration = DynamicEngineConfiguration(
@@ -38,10 +39,16 @@ final class DynamicLightingEngine {
     private var lastEmitDate: Date?
     private var activeCaptureFrameRate: Int?
     private var lastDiagnosticsPublishDate: Date?
+    private var frameWorkScheduled = false
+    private var pendingFrame: CapturedFrame?
 
     init(captureService: ScreenCaptureService, analyzer: ColorAnalysisService) {
         self.captureService = captureService
         self.analyzer = analyzer
+
+        captureService.shouldAcceptFrame = { [weak self] in
+            self?.shouldAcceptFrame() ?? false
+        }
 
         captureService.frameHandler = { [weak self] frame in
             self?.handle(frame: frame)
@@ -55,6 +62,7 @@ final class DynamicLightingEngine {
                 if state == .error {
                     self.isRunning = false
                     self.latestFrame = nil
+                    self.clearQueuedFrames()
                     self.lastSentSourceTime = .invalid
                     self.lastOutputColor = nil
                     self.lastEmitDate = nil
@@ -72,6 +80,7 @@ final class DynamicLightingEngine {
             self.isRunning = true
             self.activeCaptureFrameRate = configuration.updateRate
             self.latestFrame = nil
+            self.clearQueuedFrames()
             self.lastSentSourceTime = .invalid
             self.lastOutputColor = nil
             self.lastEmitDate = nil
@@ -123,17 +132,60 @@ final class DynamicLightingEngine {
             self.lastEmitDate = nil
             self.activeCaptureFrameRate = nil
             self.lastDiagnostics.streamState = .idle
+            self.clearQueuedFrames()
             self.publishDiagnostics(force: true)
             self.captureService.stop()
         }
     }
 
     private func handle(frame: CapturedFrame) {
-        queue.async {
-            guard self.isRunning else { return }
-            self.latestFrame = frame
-            self.process(frame: frame, forceEmit: false)
+        frameCoalescingLock.lock()
+        if frameWorkScheduled {
+            pendingFrame = frame
+            frameCoalescingLock.unlock()
+            return
         }
+
+        frameWorkScheduled = true
+        frameCoalescingLock.unlock()
+
+        queue.async {
+            self.drainFrames(startingWith: frame)
+        }
+    }
+
+    private func shouldAcceptFrame() -> Bool {
+        frameCoalescingLock.lock()
+        let shouldAccept = !frameWorkScheduled || pendingFrame == nil
+        frameCoalescingLock.unlock()
+        return shouldAccept
+    }
+
+    private func drainFrames(startingWith firstFrame: CapturedFrame) {
+        var frame: CapturedFrame? = firstFrame
+
+        while let currentFrame = frame {
+            if isRunning {
+                latestFrame = currentFrame
+                process(frame: currentFrame, forceEmit: false)
+            }
+
+            frameCoalescingLock.lock()
+            if let queuedFrame = pendingFrame {
+                pendingFrame = nil
+                frame = queuedFrame
+            } else {
+                frameWorkScheduled = false
+                frame = nil
+            }
+            frameCoalescingLock.unlock()
+        }
+    }
+
+    private func clearQueuedFrames() {
+        frameCoalescingLock.lock()
+        pendingFrame = nil
+        frameCoalescingLock.unlock()
     }
 
     private func process(frame: CapturedFrame, forceEmit: Bool) {

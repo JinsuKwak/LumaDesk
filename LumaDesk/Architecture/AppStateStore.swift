@@ -19,6 +19,7 @@ final class AppStateStore: ObservableObject {
     private var didBootstrap = false
     private var pendingStaticOutputTask: Task<Void, Never>?
     private var lastStaticOutputDate: Date?
+    private var wakeLightingTask: Task<Void, Never>?
 
     init(
         preferencesStore: PreferencesStore,
@@ -38,7 +39,12 @@ final class AppStateStore: ObservableObject {
 
         bleDeviceManager.connectionStateHandler = { [weak self] state in
             Task { @MainActor [weak self] in
-                self?.connectionState = state
+                guard let self else { return }
+                self.connectionState = state
+
+                if case .connected = state {
+                    self.applyLightingAfterDeviceReconnect()
+                }
             }
         }
 
@@ -459,15 +465,30 @@ final class AppStateStore: ObservableObject {
     }
 
     func handleSystemSleep() {
+        wakeLightingTask?.cancel()
+        wakeLightingTask = nil
+
         guard preferences.general.autoTurnOff else { return }
         turnLightOff(preservingIntent: preferences.general.autoTurnOn)
     }
 
     func handleSystemWake() {
+        bleDeviceManager.handleSystemWake()
+        wakeLightingTask?.cancel()
+
         guard preferences.general.autoTurnOn else { return }
-        preferences.lastLightEnabled = true
-        persist()
-        applyLightingState(forceEnable: true)
+
+        wakeLightingTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.preferences.lastLightEnabled = true
+                self.persist()
+                self.applyLightingState(forceEnable: true)
+            }
+        }
     }
 
     func handleApplicationTermination() {
@@ -511,6 +532,11 @@ final class AppStateStore: ObservableObject {
     private func refreshDynamicRulesIfNeeded() {
         guard isDynamicOutputActive else { return }
         dynamicLightingEngine.update(configuration: currentDynamicConfiguration)
+    }
+
+    private func applyLightingAfterDeviceReconnect() {
+        guard preferences.lastLightEnabled, preferences.brightness > 0.01 else { return }
+        applyLightingState(forceEnable: true)
     }
 
     private func startDynamicOutput() {

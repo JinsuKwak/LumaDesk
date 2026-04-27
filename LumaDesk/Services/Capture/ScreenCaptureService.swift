@@ -5,6 +5,7 @@ import Foundation
 import ScreenCaptureKit
 
 final class ScreenCaptureService: NSObject {
+    var shouldAcceptFrame: (() -> Bool)?
     var frameHandler: ((CapturedFrame) -> Void)?
     var streamStateHandler: ((CaptureStreamState, String?) -> Void)?
 
@@ -191,7 +192,11 @@ final class ScreenCaptureService: NSObject {
                     configuration: configuration
                 )
 
-                guard let pixelBuffer = self?.makePixelBuffer(from: image, width: configuration.width, height: configuration.height) else {
+                let pixelBuffer = autoreleasepool {
+                    self?.makePixelBuffer(from: image, width: configuration.width, height: configuration.height)
+                }
+
+                guard let pixelBuffer else {
                     self?.finishFallbackCapture(error: nil)
                     return
                 }
@@ -234,7 +239,6 @@ final class ScreenCaptureService: NSObject {
     }
 
     private func makePixelBuffer(from image: CGImage, width: Int, height: Int) -> CVPixelBuffer? {
-        let attributes = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
         var pixelBuffer: CVPixelBuffer?
 
         let result = CVPixelBufferCreate(
@@ -242,7 +246,7 @@ final class ScreenCaptureService: NSObject {
             width,
             height,
             kCVPixelFormatType_32BGRA,
-            attributes,
+            nil,
             &pixelBuffer
         )
 
@@ -326,6 +330,12 @@ extension ScreenCaptureService: SCStreamDelegate {
 
 extension ScreenCaptureService: SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of outputType: SCStreamOutputType) {
+        autoreleasepool {
+            processSampleBuffer(sampleBuffer, outputType: outputType)
+        }
+    }
+
+    private func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, outputType: SCStreamOutputType) {
         guard outputType == .screen else { return }
         guard CMSampleBufferIsValid(sampleBuffer) else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -339,9 +349,11 @@ extension ScreenCaptureService: SCStreamOutput {
             return
         }
 
+        lastStreamFrameDate = Date()
+        guard shouldAcceptFrame?() ?? true else { return }
+
         guard let copiedPixelBuffer = copyPixelBuffer(pixelBuffer) else { return }
 
-        lastStreamFrameDate = Date()
         let label = frameStatusLabel(frameStatus)
         let frame = CapturedFrame(
             pixelBuffer: copiedPixelBuffer,
@@ -356,7 +368,6 @@ extension ScreenCaptureService: SCStreamOutput {
         let width = CVPixelBufferGetWidth(source)
         let height = CVPixelBufferGetHeight(source)
         let pixelFormat = CVPixelBufferGetPixelFormatType(source)
-        let attributes = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
         var destination: CVPixelBuffer?
 
         let result = CVPixelBufferCreate(
@@ -364,7 +375,7 @@ extension ScreenCaptureService: SCStreamOutput {
             width,
             height,
             pixelFormat,
-            attributes,
+            nil,
             &destination
         )
 

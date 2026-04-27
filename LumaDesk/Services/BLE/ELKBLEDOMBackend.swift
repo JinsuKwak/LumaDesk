@@ -47,6 +47,9 @@ final class ELKBLEDOMBackend: NSObject, LEDStripBackend {
     private var writeGeneration = 0
     private var powerReadyDate: Date?
     private var manualDisconnectRequested = false
+    private var retryWhenBluetoothPowersOn = false
+    private var wakeRetryWorkItem: DispatchWorkItem?
+    private let wakeBluetoothSettleDelay: TimeInterval = 2.5
 
     override init() {
         adapter = ELKBLEDOMProtocolAdapter()
@@ -71,17 +74,30 @@ final class ELKBLEDOMBackend: NSObject, LEDStripBackend {
 
     func restartScan() {
         manualDisconnectRequested = false
-        cancelPendingDynamicColor()
-        connectedPeripheral = nil
-        writeCharacteristic = nil
-        isPowered = false
-        powerReadyDate = nil
-        startScanning()
+        prepareForConnectionRetry()
+        retryConnectionWhenBluetoothIsReady()
+    }
+
+    func handleSystemWake() {
+        manualDisconnectRequested = false
+        wakeRetryWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.prepareForConnectionRetry()
+            self.retryConnectionWhenBluetoothIsReady()
+        }
+
+        wakeRetryWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + wakeBluetoothSettleDelay, execute: workItem)
     }
 
     func disconnect() {
         manualDisconnectRequested = true
         isScanning = false
+        retryWhenBluetoothPowersOn = false
+        wakeRetryWorkItem?.cancel()
+        wakeRetryWorkItem = nil
         cancelPendingDynamicColor()
         centralManager.stopScan()
 
@@ -161,6 +177,41 @@ final class ELKBLEDOMBackend: NSObject, LEDStripBackend {
         pendingDynamicColor = nil
     }
 
+    private func prepareForConnectionRetry() {
+        cancelPendingDynamicColor()
+        isScanning = false
+        centralManager.stopScan()
+
+        if let connectedPeripheral {
+            centralManager.cancelPeripheralConnection(connectedPeripheral)
+        }
+
+        connectedPeripheral = nil
+        writeCharacteristic = nil
+        isPowered = false
+        powerReadyDate = nil
+    }
+
+    private func retryConnectionWhenBluetoothIsReady() {
+        switch centralManager.state {
+        case .poweredOn:
+            retryWhenBluetoothPowersOn = false
+            startScanning()
+        case .poweredOff, .resetting, .unknown:
+            retryWhenBluetoothPowersOn = true
+            connectionStateHandler?(.error(bluetoothUnavailableMessage(for: centralManager.state)))
+        case .unauthorized:
+            retryWhenBluetoothPowersOn = false
+            connectionStateHandler?(.error("Bluetooth denied"))
+        case .unsupported:
+            retryWhenBluetoothPowersOn = false
+            connectionStateHandler?(.error("Bluetooth unsupported"))
+        @unknown default:
+            retryWhenBluetoothPowersOn = true
+            connectionStateHandler?(.error("Bluetooth unavailable"))
+        }
+    }
+
     private func writeColor(_ color: RGBColor, peripheral: CBPeripheral, characteristic: CBCharacteristic) {
         writeGeneration += 1
         let generation = writeGeneration
@@ -217,14 +268,35 @@ final class ELKBLEDOMBackend: NSObject, LEDStripBackend {
 
     private func startScanning() {
         guard centralManager.state == .poweredOn else {
-            connectionStateHandler?(.error("Bluetooth unavailable"))
+            retryWhenBluetoothPowersOn = true
+            connectionStateHandler?(.error(bluetoothUnavailableMessage(for: centralManager.state)))
             return
         }
 
+        retryWhenBluetoothPowersOn = false
         guard !isScanning else { return }
         isScanning = true
         connectionStateHandler?(.scanning)
         centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+    }
+
+    private func bluetoothUnavailableMessage(for state: CBManagerState) -> String {
+        switch state {
+        case .poweredOff:
+            "Bluetooth off"
+        case .resetting:
+            "Bluetooth starting"
+        case .unknown:
+            "Bluetooth starting"
+        case .unauthorized:
+            "Bluetooth denied"
+        case .unsupported:
+            "Bluetooth unsupported"
+        case .poweredOn:
+            "Bluetooth available"
+        @unknown default:
+            "Bluetooth unavailable"
+        }
     }
 
     private func matchesTargetDevice(peripheral: CBPeripheral, advertisementData: [String: Any]) -> Bool {
@@ -241,20 +313,45 @@ extension ELKBLEDOMBackend: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
+            guard !manualDisconnectRequested else {
+                retryWhenBluetoothPowersOn = false
+                connectionStateHandler?(.disconnected)
+                return
+            }
+
+            if retryWhenBluetoothPowersOn || autoReconnect {
+                prepareForConnectionRetry()
+            }
+
             startScanning()
         case .poweredOff:
+            prepareForBluetoothUnavailableState()
             connectionStateHandler?(.error("Bluetooth off"))
         case .unauthorized:
+            retryWhenBluetoothPowersOn = false
+            prepareForBluetoothUnavailableState()
             connectionStateHandler?(.error("Bluetooth denied"))
         case .unsupported:
+            retryWhenBluetoothPowersOn = false
+            prepareForBluetoothUnavailableState()
             connectionStateHandler?(.error("Bluetooth unsupported"))
         case .resetting:
+            retryWhenBluetoothPowersOn = true
             connectionStateHandler?(.connecting(nil))
         case .unknown:
             connectionStateHandler?(.disconnected)
         @unknown default:
             connectionStateHandler?(.error("Bluetooth unknown"))
         }
+    }
+
+    private func prepareForBluetoothUnavailableState() {
+        cancelPendingDynamicColor()
+        isScanning = false
+        connectedPeripheral = nil
+        writeCharacteristic = nil
+        isPowered = false
+        powerReadyDate = nil
     }
 
     func centralManager(
