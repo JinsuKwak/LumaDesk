@@ -33,7 +33,6 @@ final class DynamicLightingEngine {
         calibratedWhiteColor: RGBColor(red: 1, green: 1, blue: 1)
     )
     private var lastDiagnostics = CaptureDiagnostics()
-    private var latestFrame: CapturedFrame?
     private var lastSentSourceTime: CMTime = .invalid
     private var lastOutputColor: RGBColor?
     private var lastEmitDate: Date?
@@ -41,6 +40,7 @@ final class DynamicLightingEngine {
     private var lastDiagnosticsPublishDate: Date?
     private var frameWorkScheduled = false
     private var pendingFrame: CapturedFrame?
+    private var frameGeneration = 0
 
     init(captureService: ScreenCaptureService, analyzer: ColorAnalysisService) {
         self.captureService = captureService
@@ -61,8 +61,7 @@ final class DynamicLightingEngine {
                 self.lastDiagnostics.lastError = error
                 if state == .error {
                     self.isRunning = false
-                    self.latestFrame = nil
-                    self.clearQueuedFrames()
+                    self.resetQueuedFrames()
                     self.lastSentSourceTime = .invalid
                     self.lastOutputColor = nil
                     self.lastEmitDate = nil
@@ -79,8 +78,7 @@ final class DynamicLightingEngine {
             let needsFreshStart = !self.isRunning
             self.isRunning = true
             self.activeCaptureFrameRate = configuration.updateRate
-            self.latestFrame = nil
-            self.clearQueuedFrames()
+            self.resetQueuedFrames()
             self.lastSentSourceTime = .invalid
             self.lastOutputColor = nil
             self.lastEmitDate = nil
@@ -109,10 +107,6 @@ final class DynamicLightingEngine {
                 self.lastSentSourceTime = .invalid
                 self.lastOutputColor = nil
                 self.lastEmitDate = nil
-
-                if let latestFrame = self.latestFrame {
-                    self.process(frame: latestFrame, forceEmit: true)
-                }
             }
 
             if configuration.updateRate != previousConfiguration.updateRate || self.activeCaptureFrameRate != configuration.updateRate {
@@ -126,13 +120,12 @@ final class DynamicLightingEngine {
         queue.async {
             guard self.isRunning else { return }
             self.isRunning = false
-            self.latestFrame = nil
             self.lastSentSourceTime = .invalid
             self.lastOutputColor = nil
             self.lastEmitDate = nil
             self.activeCaptureFrameRate = nil
             self.lastDiagnostics.streamState = .idle
-            self.clearQueuedFrames()
+            self.resetQueuedFrames()
             self.publishDiagnostics(force: true)
             self.captureService.stop()
         }
@@ -147,10 +140,11 @@ final class DynamicLightingEngine {
         }
 
         frameWorkScheduled = true
+        let generation = frameGeneration
         frameCoalescingLock.unlock()
 
         queue.async {
-            self.drainFrames(startingWith: frame)
+            self.drainFrames(startingWith: frame, generation: generation)
         }
     }
 
@@ -161,17 +155,20 @@ final class DynamicLightingEngine {
         return shouldAccept
     }
 
-    private func drainFrames(startingWith firstFrame: CapturedFrame) {
+    private func drainFrames(startingWith firstFrame: CapturedFrame, generation: Int) {
         var frame: CapturedFrame? = firstFrame
 
         while let currentFrame = frame {
-            if isRunning {
-                latestFrame = currentFrame
+            if isRunning, generation == currentFrameGeneration {
                 process(frame: currentFrame, forceEmit: false)
             }
 
             frameCoalescingLock.lock()
-            if let queuedFrame = pendingFrame {
+            if generation != frameGeneration {
+                pendingFrame = nil
+                frameWorkScheduled = false
+                frame = nil
+            } else if let queuedFrame = pendingFrame {
                 pendingFrame = nil
                 frame = queuedFrame
             } else {
@@ -182,9 +179,18 @@ final class DynamicLightingEngine {
         }
     }
 
-    private func clearQueuedFrames() {
+    private var currentFrameGeneration: Int {
         frameCoalescingLock.lock()
+        let generation = frameGeneration
+        frameCoalescingLock.unlock()
+        return generation
+    }
+
+    private func resetQueuedFrames() {
+        frameCoalescingLock.lock()
+        frameGeneration += 1
         pendingFrame = nil
+        frameWorkScheduled = false
         frameCoalescingLock.unlock()
     }
 
@@ -208,8 +214,8 @@ final class DynamicLightingEngine {
         lastDiagnostics.pixelFormat = analysis.pixelFormat
         lastDiagnostics.screenColor = analysis.color
         lastDiagnostics.sampleCount = analysis.sampleCount
-        let didEmit = emit(analysis: analysis, force: forceEmit)
-        publishDiagnostics(force: forceEmit || didEmit)
+        _ = emit(analysis: analysis, force: forceEmit)
+        publishDiagnostics(force: forceEmit)
     }
 
     @discardableResult
@@ -282,7 +288,7 @@ final class DynamicLightingEngine {
         let now = Date()
         if !force,
            let lastDiagnosticsPublishDate,
-           now.timeIntervalSince(lastDiagnosticsPublishDate) < 0.25
+           now.timeIntervalSince(lastDiagnosticsPublishDate) < 1.0
         {
             return
         }

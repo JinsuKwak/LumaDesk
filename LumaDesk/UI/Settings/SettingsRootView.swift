@@ -1,11 +1,31 @@
 import SwiftUI
 
-private enum SettingsTab: Hashable {
+private enum SettingsTab: CaseIterable, Hashable {
     case general
     case dynamic
     case calibration
     case device
     case displays
+
+    var title: String {
+        switch self {
+        case .general: "General"
+        case .dynamic: "Dynamic"
+        case .calibration: "Calibration"
+        case .device: "Device"
+        case .displays: "Displays"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: "gearshape"
+        case .dynamic: "waveform.path.ecg"
+        case .calibration: "dial.medium"
+        case .device: "dot.radiowaves.left.and.right"
+        case .displays: "display"
+        }
+    }
 }
 
 struct SettingsRootView: View {
@@ -13,31 +33,75 @@ struct SettingsRootView: View {
     @State private var selection: SettingsTab = .general
 
     var body: some View {
-        TabView(selection: $selection) {
-            generalPane
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(SettingsTab.general)
+        HStack(spacing: 0) {
+            settingsSidebar
 
-            dynamicPane
-                .tabItem { Label("Dynamic", systemImage: "waveform.path.ecg") }
-                .tag(SettingsTab.dynamic)
+            Divider()
 
-            calibrationPane
-                .tabItem { Label("Calibration", systemImage: "dial.medium") }
-                .tag(SettingsTab.calibration)
-
-            devicePane
-                .tabItem { Label("Device", systemImage: "dot.radiowaves.left.and.right") }
-                .tag(SettingsTab.device)
-
-            displaysPane
-                .tabItem { Label("Displays", systemImage: "display") }
-                .tag(SettingsTab.displays)
+            selectedPane
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 660, minHeight: 560)
-        .padding(.top, 10)
+        .frame(minWidth: 720, minHeight: 560)
         .onAppear {
             appState.refreshPermissions()
+        }
+    }
+
+    private var settingsSidebar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("LumaDesk")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 6)
+
+            ForEach(SettingsTab.allCases, id: \.self) { tab in
+                Button {
+                    selection = tab
+                } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: tab.systemImage)
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(width: 18)
+
+                        Text(tab.title)
+                            .font(.system(size: 13, weight: .medium))
+
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(selection == tab ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background {
+                        if selection == tab {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.primary.opacity(0.08))
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            Spacer()
+        }
+        .padding(12)
+        .frame(minWidth: 156, idealWidth: 156, maxWidth: 156, maxHeight: .infinity, alignment: .top)
+        .background(.regularMaterial)
+    }
+
+    @ViewBuilder
+    private var selectedPane: some View {
+        switch selection {
+        case .general:
+            generalPane
+        case .dynamic:
+            dynamicPane
+        case .calibration:
+            calibrationPane
+        case .device:
+            devicePane
+        case .displays:
+            displaysPane
         }
     }
 

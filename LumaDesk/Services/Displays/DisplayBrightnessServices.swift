@@ -41,21 +41,27 @@ enum DisplayBrightnessError: LocalizedError {
 final class AppleSiliconDDCDisplayBrightnessBackend: DisplayBrightnessBackend {
     func discoverExternalDisplays() async -> [DisplayBrightnessTarget] {
         await Task.detached(priority: .utility) {
-            AppleSiliconDDCMinimal.discoverDisplays().map {
-                DisplayBrightnessTarget(id: $0.id, name: $0.displayName, service: $0.service)
+            autoreleasepool {
+                AppleSiliconDDCMinimal.discoverDisplays().map {
+                    DisplayBrightnessTarget(id: $0.id, name: $0.displayName, service: $0.service)
+                }
             }
         }.value
     }
 
     func readMaxBrightness(_ target: DisplayBrightnessTarget) async -> UInt16? {
         await Task.detached(priority: .utility) {
-            AppleSiliconDDCMinimal.read(service: target.service, command: luminanceVCPCode)?.max
+            autoreleasepool {
+                AppleSiliconDDCMinimal.read(service: target.service, command: luminanceVCPCode)?.max
+            }
         }.value
     }
 
     func setBrightness(_ target: DisplayBrightnessTarget, rawValue: UInt16) async -> Bool {
         await Task.detached(priority: .utility) {
-            AppleSiliconDDCMinimal.write(service: target.service, command: luminanceVCPCode, value: rawValue)
+            autoreleasepool {
+                AppleSiliconDDCMinimal.write(service: target.service, command: luminanceVCPCode, value: rawValue)
+            }
         }.value
     }
 }
@@ -63,7 +69,9 @@ final class AppleSiliconDDCDisplayBrightnessBackend: DisplayBrightnessBackend {
 final class MacBuiltInBrightnessProvider: BuiltInBrightnessProvider {
     func readBuiltInBrightness() async throws -> Double {
         try await Task.detached(priority: .utility) {
-            try Self.readBrightnessSynchronously()
+            try autoreleasepool {
+                try Self.readBrightnessSynchronously()
+            }
         }.value
     }
 

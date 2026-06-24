@@ -20,6 +20,8 @@ final class ScreenCaptureService: NSObject {
     private var fallbackBackoffUntil: Date?
     private var fallbackCaptureInFlight = false
     private var intentionalStopInFlight = false
+    private var copyBufferPool: CVPixelBufferPool?
+    private var copyBufferPoolKey: PixelBufferPoolKey?
 
     func start(frameRate: Int) async {
         configuredFrameRate = frameRate
@@ -70,6 +72,7 @@ final class ScreenCaptureService: NSObject {
 
         Task {
             do {
+                try? stream.removeStreamOutput(self, type: .screen)
                 try await stream.stopCapture()
             } catch {
                 // A user/system stop can race the delegate callback; the stale stream is discarded below.
@@ -289,6 +292,7 @@ final class ScreenCaptureService: NSObject {
 
         if stopUnderlyingStream, let streamToStop {
             Task {
+                try? streamToStop.removeStreamOutput(self, type: .screen)
                 try? await streamToStop.stopCapture()
             }
         }
@@ -301,6 +305,7 @@ final class ScreenCaptureService: NSObject {
         lastFallbackFrameDate = nil
         fallbackBackoffUntil = nil
         fallbackCaptureInFlight = false
+        flushCopyBufferPool()
     }
 }
 
@@ -368,18 +373,9 @@ extension ScreenCaptureService: SCStreamOutput {
         let width = CVPixelBufferGetWidth(source)
         let height = CVPixelBufferGetHeight(source)
         let pixelFormat = CVPixelBufferGetPixelFormatType(source)
-        var destination: CVPixelBuffer?
-
-        let result = CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            width,
-            height,
-            pixelFormat,
-            nil,
-            &destination
-        )
-
-        guard result == kCVReturnSuccess, let destination else { return nil }
+        guard let destination = pooledPixelBuffer(width: width, height: height, pixelFormat: pixelFormat) else {
+            return nil
+        }
 
         CVPixelBufferLockBaseAddress(source, .readOnly)
         CVPixelBufferLockBaseAddress(destination, [])
@@ -409,6 +405,63 @@ extension ScreenCaptureService: SCStreamOutput {
         return destination
     }
 
+    private func pooledPixelBuffer(width: Int, height: Int, pixelFormat: OSType) -> CVPixelBuffer? {
+        let key = PixelBufferPoolKey(width: width, height: height, pixelFormat: pixelFormat)
+
+        if copyBufferPool == nil || copyBufferPoolKey != key {
+            copyBufferPool = makeCopyBufferPool(width: width, height: height, pixelFormat: pixelFormat)
+            copyBufferPoolKey = key
+        }
+
+        guard let copyBufferPool else { return nil }
+
+        var pixelBuffer: CVPixelBuffer?
+        let auxiliaryAttributes = [
+            kCVPixelBufferPoolAllocationThresholdKey as String: 4,
+        ] as CFDictionary
+        let result = CVPixelBufferPoolCreatePixelBufferWithAuxAttributes(
+            kCFAllocatorDefault,
+            copyBufferPool,
+            auxiliaryAttributes,
+            &pixelBuffer
+        )
+        guard result == kCVReturnSuccess else { return nil }
+
+        return pixelBuffer
+    }
+
+    private func makeCopyBufferPool(width: Int, height: Int, pixelFormat: OSType) -> CVPixelBufferPool? {
+        let poolAttributes: [String: Any] = [
+            kCVPixelBufferPoolMinimumBufferCountKey as String: 3,
+        ]
+
+        let pixelBufferAttributes: [String: Any] = [
+            kCVPixelBufferWidthKey as String: width,
+            kCVPixelBufferHeightKey as String: height,
+            kCVPixelBufferPixelFormatTypeKey as String: pixelFormat,
+        ]
+
+        var pool: CVPixelBufferPool?
+        let result = CVPixelBufferPoolCreate(
+            kCFAllocatorDefault,
+            poolAttributes as CFDictionary,
+            pixelBufferAttributes as CFDictionary,
+            &pool
+        )
+
+        guard result == kCVReturnSuccess else { return nil }
+        return pool
+    }
+
+    private func flushCopyBufferPool() {
+        if let copyBufferPool {
+            CVPixelBufferPoolFlush(copyBufferPool, .excessBuffers)
+        }
+
+        copyBufferPool = nil
+        copyBufferPoolKey = nil
+    }
+
     private func frameStatusLabel(_ status: SCFrameStatus?) -> String {
         guard let status else { return "unknown" }
 
@@ -429,4 +482,10 @@ extension ScreenCaptureService: SCStreamOutput {
             return "raw \(status.rawValue)"
         }
     }
+}
+
+private struct PixelBufferPoolKey: Equatable {
+    var width: Int
+    var height: Int
+    var pixelFormat: OSType
 }
