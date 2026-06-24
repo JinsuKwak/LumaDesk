@@ -35,6 +35,10 @@ final class MenuBarController: NSObject {
         onOpenSettings()
     }
 
+    @objc private func switchAway() {
+        appState.switchDisplaysAway()
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -90,14 +94,31 @@ final class MenuBarController: NSObject {
 
     private func showContextMenu() {
         let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let switchAwayItem = NSMenuItem(title: "Switch Away", action: #selector(switchAway), keyEquivalent: "")
+        switchAwayItem.target = self
+        switchAwayItem.isEnabled = true
+        switchAwayItem.attributedTitle = NSAttributedString(
+            string: "Switch Away",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 13, weight: .semibold)
+            ]
+        )
+        menu.addItem(switchAwayItem)
+
+        menu.addItem(.separator())
+
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
+        settingsItem.isEnabled = true
         menu.addItem(settingsItem)
 
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
+        quitItem.isEnabled = true
         menu.addItem(quitItem)
 
         statusItem.menu = menu

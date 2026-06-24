@@ -113,10 +113,26 @@ enum AppleSiliconDDCMinimal {
         )
     }
 
-    static func write(service: IOAVService?, command: UInt8, value: UInt16) -> Bool {
+    static func write(
+        service: IOAVService?,
+        command: UInt8,
+        value: UInt16,
+        writeSleepTime: UInt32 = 10_000,
+        writeCycles: UInt8 = 2,
+        retryAttempts: UInt8 = 4,
+        retrySleepTime: UInt32 = 20_000
+    ) -> Bool {
         var send: [UInt8] = [command, UInt8(value >> 8), UInt8(value & 0xFF)]
         var reply: [UInt8] = []
-        return performDDCCommunication(service: service, send: &send, reply: &reply)
+        return performDDCCommunication(
+            service: service,
+            send: &send,
+            reply: &reply,
+            writeSleepTime: writeSleepTime,
+            writeCycles: writeCycles,
+            retryAttempts: retryAttempts,
+            retrySleepTime: retrySleepTime
+        )
     }
 
     private static func performDDCCommunication(

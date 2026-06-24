@@ -518,16 +518,19 @@ struct SettingsRootView: View {
 
                     Spacer()
 
+                    Button("Switch Away") {
+                        appState.switchDisplaysAway()
+                    }
+
                     Button("Refresh") {
                         appState.refreshDisplaySync()
                     }
-                    .disabled(!appState.preferences.displaySync.isEnabled)
                 }
             }
 
             Section("Monitors") {
                 if appState.displaySyncSnapshots.isEmpty {
-                    Text(appState.preferences.displaySync.isEnabled ? "No external displays found." : "Enable sync to scan displays.")
+                    Text(appState.preferences.displaySync.isEnabled ? "No external displays found." : "Use Refresh to scan displays.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(appState.displaySyncSnapshots) { snapshot in
@@ -622,29 +625,59 @@ struct SettingsRootView: View {
                 Text(snapshot.name)
                     .font(.system(size: 13, weight: .medium))
 
-                if let lastBrightnessPercent = snapshot.lastBrightnessPercent {
-                    Text(lastBrightnessPercent.formatted(.percent.precision(.fractionLength(0))))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("Not synced")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(displaySyncDetailText(snapshot))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            Circle()
-                .fill(snapshot.state.tint)
-                .frame(width: 8, height: 8)
+            VStack(alignment: .trailing, spacing: 5) {
+                Menu {
+                    Button("None") {
+                        appState.setAwayInput(nil, forDisplayID: snapshot.id)
+                    }
 
-            Text(snapshot.state.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 92, alignment: .trailing)
+                    Divider()
+
+                    ForEach(DisplayInputSource.allCases) { source in
+                        Button(source.title) {
+                            appState.setAwayInput(source, forDisplayID: snapshot.id)
+                        }
+                    }
+                } label: {
+                    Text(snapshot.awayInput.map { "Away \($0.shortTitle)" } ?? "Away")
+                        .font(.caption)
+                }
+                .frame(width: 92, alignment: .trailing)
+
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(snapshot.state.tint)
+                        .frame(width: 8, height: 8)
+
+                    Text(snapshot.state.label)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(minWidth: 100, alignment: .trailing)
         }
         .padding(.vertical, 4)
+    }
+
+    private func displaySyncDetailText(_ snapshot: DisplaySyncSnapshot) -> String {
+        var parts: [String] = []
+
+        if let lastBrightnessPercent = snapshot.lastBrightnessPercent {
+            parts.append(lastBrightnessPercent.formatted(.percent.precision(.fractionLength(0))))
+        }
+
+        if let currentInputCode = snapshot.currentInputCode {
+            parts.append("Input \(DisplayInputSource.title(for: currentInputCode))")
+        }
+
+        return parts.isEmpty ? "Not synced" : parts.joined(separator: " · ")
     }
 
     private func sourceStatusColor(_ status: String) -> Color {

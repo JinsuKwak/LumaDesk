@@ -431,13 +431,58 @@ struct BLESettings: Codable, Equatable {
     var autoReconnect: Bool = true
 }
 
+enum DisplayInputSource: UInt16, Codable, CaseIterable, Identifiable {
+    case displayPort1 = 0x0F
+    case displayPort2 = 0x10
+    case hdmi1 = 0x11
+    case hdmi2 = 0x12
+    case usbC = 0x1B
+
+    var id: UInt16 { rawValue }
+
+    var title: String {
+        switch self {
+        case .displayPort1: "DisplayPort 1"
+        case .displayPort2: "DisplayPort 2"
+        case .hdmi1: "HDMI 1"
+        case .hdmi2: "HDMI 2"
+        case .usbC: "USB-C"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .displayPort1: "DP 1"
+        case .displayPort2: "DP 2"
+        case .hdmi1: "HDMI 1"
+        case .hdmi2: "HDMI 2"
+        case .usbC: "USB-C"
+        }
+    }
+
+    var codeText: String {
+        Self.codeText(for: rawValue)
+    }
+
+    static func title(for code: UInt16) -> String {
+        guard code != 0 else { return "Unknown" }
+        return Self(rawValue: code)?.shortTitle ?? "Input \(codeText(for: code))"
+    }
+
+    static func codeText(for code: UInt16) -> String {
+        String(format: "0x%02X", code)
+    }
+}
+
 struct DisplaySyncSettings: Codable, Equatable {
     var isEnabled: Bool = false
     var pollingRateHz: Double = 2
+    var awayInputAssignments: [String: DisplayInputSource] = [:]
 
     enum CodingKeys: String, CodingKey {
         case isEnabled
         case pollingRateHz
+        case awayInputAssignments
     }
 
     init() {}
@@ -446,6 +491,12 @@ struct DisplaySyncSettings: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
         pollingRateHz = (try container.decodeIfPresent(Double.self, forKey: .pollingRateHz) ?? 2).clamped(to: 1 ... 10)
+
+        if let rawAssignments = try container.decodeIfPresent([String: UInt16].self, forKey: .awayInputAssignments) {
+            awayInputAssignments = rawAssignments.compactMapValues(DisplayInputSource.init(rawValue:))
+        } else {
+            awayInputAssignments = [:]
+        }
     }
 }
 
@@ -516,6 +567,9 @@ enum DisplaySyncDisplayState: Equatable {
     case ready
     case connected
     case syncing
+    case switching
+    case sent
+    case away
     case disconnected
     case unsupported
     case error(String)
@@ -526,6 +580,9 @@ enum DisplaySyncDisplayState: Equatable {
         case .ready: "Ready"
         case .connected: "Synced"
         case .syncing: "Syncing"
+        case .switching: "Switching"
+        case .sent: "Sent"
+        case .away: "Away"
         case .disconnected: "Disconnected"
         case .unsupported: "Unsupported"
         case .error(let message): "Error \(message)"
@@ -538,8 +595,10 @@ enum DisplaySyncDisplayState: Equatable {
             .green
         case .ready:
             .secondary
-        case .syncing:
+        case .syncing, .switching, .sent:
             .orange
+        case .away:
+            .blue
         case .disconnected, .error:
             .red
         case .unsupported:
@@ -556,6 +615,8 @@ struct DisplaySyncSnapshot: Equatable, Identifiable {
     var state: DisplaySyncDisplayState
     var lastBrightnessPercent: Double?
     var lastSeen: Date?
+    var awayInput: DisplayInputSource?
+    var currentInputCode: UInt16?
 }
 
 struct CaptureDiagnostics: Equatable {

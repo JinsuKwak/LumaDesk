@@ -25,7 +25,10 @@
 		A0000000000000000000000F /* SettingsRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010F /* SettingsRootView.swift */; };
 		A00000000000000000000011 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000112 /* Assets.xcassets */; };
 		A00000000000000000000012 /* AppleSiliconDDCMinimal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000113 /* AppleSiliconDDCMinimal.swift */; };
-		A00000000000000000000013 /* DisplayBrightnessServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000114 /* DisplayBrightnessServices.swift */; };
+		A00000000000000000000013 /* DisplayBrightnessBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000114 /* DisplayBrightnessBackend.swift */; };
+		A00000000000000000000014 /* MacBuiltInBrightnessProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000116 /* MacBuiltInBrightnessProvider.swift */; };
+		A00000000000000000000015 /* DisplaySyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000117 /* DisplaySyncService.swift */; };
+		A00000000000000000000016 /* DisplayReconfigurationObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000118 /* DisplayReconfigurationObserver.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -49,8 +52,11 @@
 		A00000000000000000000110 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A00000000000000000000112 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A00000000000000000000113 /* AppleSiliconDDCMinimal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleSiliconDDCMinimal.swift; sourceTree = "<group>"; };
-		A00000000000000000000114 /* DisplayBrightnessServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayBrightnessServices.swift; sourceTree = "<group>"; };
+		A00000000000000000000114 /* DisplayBrightnessBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayBrightnessBackend.swift; sourceTree = "<group>"; };
 		A00000000000000000000115 /* LumaDesk-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "LumaDesk-Bridging-Header.h"; sourceTree = "<group>"; };
+		A00000000000000000000116 /* MacBuiltInBrightnessProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacBuiltInBrightnessProvider.swift; sourceTree = "<group>"; };
+		A00000000000000000000117 /* DisplaySyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplaySyncService.swift; sourceTree = "<group>"; };
+		A00000000000000000000118 /* DisplayReconfigurationObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayReconfigurationObserver.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -176,7 +182,10 @@
 			isa = PBXGroup;
 			children = (
 				A00000000000000000000113 /* AppleSiliconDDCMinimal.swift */,
-				A00000000000000000000114 /* DisplayBrightnessServices.swift */,
+				A00000000000000000000114 /* DisplayBrightnessBackend.swift */,
+				A00000000000000000000116 /* MacBuiltInBrightnessProvider.swift */,
+				A00000000000000000000117 /* DisplaySyncService.swift */,
+				A00000000000000000000118 /* DisplayReconfigurationObserver.swift */,
 			);
 			path = Displays;
 			sourceTree = "<group>";
@@ -299,7 +308,10 @@
 				A0000000000000000000000B /* ColorAnalysisService.swift in Sources */,
 				A0000000000000000000000C /* DynamicLightingEngine.swift in Sources */,
 				A00000000000000000000012 /* AppleSiliconDDCMinimal.swift in Sources */,
-				A00000000000000000000013 /* DisplayBrightnessServices.swift in Sources */,
+				A00000000000000000000013 /* DisplayBrightnessBackend.swift in Sources */,
+				A00000000000000000000014 /* MacBuiltInBrightnessProvider.swift in Sources */,
+				A00000000000000000000015 /* DisplaySyncService.swift in Sources */,
+				A00000000000000000000016 /* DisplayReconfigurationObserver.swift in Sources */,
 				A0000000000000000000000D /* Controls.swift in Sources */,
 				A0000000000000000000000E /* PopoverRootView.swift in Sources */,
 				A0000000000000000000000F /* SettingsRootView.swift in Sources */,

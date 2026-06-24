@@ -475,6 +475,21 @@ final class AppStateStore: ObservableObject {
         displaySyncService.configure(preferences.displaySync)
     }
 
+    func setAwayInput(_ source: DisplayInputSource?, forDisplayID displayID: String) {
+        if let source {
+            preferences.displaySync.awayInputAssignments[displayID] = source
+        } else {
+            preferences.displaySync.awayInputAssignments.removeValue(forKey: displayID)
+        }
+
+        persist()
+        displaySyncService.configure(preferences.displaySync)
+    }
+
+    func switchDisplaysAway() {
+        displaySyncService.switchAway()
+    }
+
     func refreshDisplaySync() {
         displaySyncService.refreshNow()
     }
