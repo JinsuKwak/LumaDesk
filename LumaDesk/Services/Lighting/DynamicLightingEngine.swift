@@ -4,13 +4,21 @@ import Foundation
 final class DynamicLightingEngine {
     var diagnosticsHandler: ((CaptureDiagnostics) -> Void)?
     var outputHandler: (@MainActor (RGBColor) -> Void)?
+    /// Called only for an unexpected capture failure. The app decides whether the
+    /// physical light keeps its last color or is switched off.
+    var captureInterruptedHandler: (@MainActor () -> Void)?
 
     private let captureService: ScreenCaptureService
     private let analyzer: ColorAnalysisService
+    private let displayReconfigurationObserver = DisplayReconfigurationObserver()
     private let queue = DispatchQueue(label: "LumaDesk.DynamicLightingEngine", qos: .userInitiated)
     private let frameCoalescingLock = NSLock()
 
     private var isRunning = false
+    private var wantsToRun = false
+    private var captureStartInFlight = false
+    private var restartWorkItem: DispatchWorkItem?
+    private var displayChangeWorkItem: DispatchWorkItem?
     private var configuration = DynamicEngineConfiguration(
         analysisMode: .full,
         colorExtractionMethod: .weightedAverage,
@@ -61,11 +69,17 @@ final class DynamicLightingEngine {
                 self.lastDiagnostics.lastError = error
                 if state == .error {
                     self.isRunning = false
+                    self.captureStartInFlight = false
                     self.resetQueuedFrames()
                     self.lastSentSourceTime = .invalid
                     self.lastOutputColor = nil
                     self.lastEmitDate = nil
                     self.activeCaptureFrameRate = nil
+                    self.notifyCaptureInterrupted()
+                    self.scheduleCaptureRestart()
+                } else if state == .active {
+                    self.captureStartInFlight = false
+                    self.isRunning = self.wantsToRun
                 }
                 self.publishDiagnostics(force: true)
             }
@@ -75,8 +89,12 @@ final class DynamicLightingEngine {
     func start(configuration: DynamicEngineConfiguration) {
         queue.async {
             self.configuration = configuration
-            let needsFreshStart = !self.isRunning
-            self.isRunning = true
+            self.wantsToRun = true
+            self.displayReconfigurationObserver.start { [weak self] in
+                self?.handleDisplayReconfiguration()
+            }
+            self.restartWorkItem?.cancel()
+            self.restartWorkItem = nil
             self.activeCaptureFrameRate = configuration.updateRate
             self.resetQueuedFrames()
             self.lastSentSourceTime = .invalid
@@ -86,14 +104,11 @@ final class DynamicLightingEngine {
             self.lastDiagnostics = CaptureDiagnostics(streamState: self.lastDiagnostics.streamState)
             self.publishDiagnostics(force: true)
 
-            guard needsFreshStart else {
+            guard !self.isRunning else {
                 self.captureService.scheduleFrameRateUpdate(configuration.updateRate)
                 return
             }
-
-            Task {
-                await self.captureService.start(frameRate: configuration.updateRate)
-            }
+            self.startCaptureIfNeeded()
         }
     }
 
@@ -118,8 +133,15 @@ final class DynamicLightingEngine {
 
     func stop() {
         queue.async {
-            guard self.isRunning else { return }
+            self.wantsToRun = false
+            self.restartWorkItem?.cancel()
+            self.restartWorkItem = nil
+            self.displayChangeWorkItem?.cancel()
+            self.displayChangeWorkItem = nil
+            self.displayReconfigurationObserver.stop()
+            guard self.isRunning || self.captureStartInFlight else { return }
             self.isRunning = false
+            self.captureStartInFlight = false
             self.lastSentSourceTime = .invalid
             self.lastOutputColor = nil
             self.lastEmitDate = nil
@@ -128,6 +150,68 @@ final class DynamicLightingEngine {
             self.resetQueuedFrames()
             self.publishDiagnostics(force: true)
             self.captureService.stop()
+        }
+    }
+
+    private func startCaptureIfNeeded() {
+        guard wantsToRun, !isRunning, !captureStartInFlight else { return }
+        captureStartInFlight = true
+        let frameRate = configuration.updateRate
+        Task { [captureService] in
+            await captureService.start(frameRate: frameRate)
+        }
+    }
+
+    private func scheduleCaptureRestart() {
+        scheduleCaptureRestart(after: 1.5)
+    }
+
+    private func scheduleCaptureRestart(after delay: TimeInterval) {
+        guard wantsToRun else { return }
+        restartWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.startCaptureIfNeeded()
+        }
+        restartWorkItem = workItem
+        // Display reassignment during input switching is asynchronous. Give
+        // ScreenCaptureKit a moment to expose the new primary display.
+        queue.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func handleDisplayReconfiguration() {
+        queue.async {
+            guard self.wantsToRun else { return }
+            self.displayChangeWorkItem?.cancel()
+
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.restartForDisplayReconfiguration()
+            }
+            self.displayChangeWorkItem = workItem
+            // macOS often emits several callbacks while it rearranges displays.
+            // Debouncing avoids restarting the stream for intermediate layouts.
+            self.queue.asyncAfter(deadline: .now() + 1.0, execute: workItem)
+        }
+    }
+
+    private func restartForDisplayReconfiguration() {
+        guard wantsToRun else { return }
+        restartWorkItem?.cancel()
+        restartWorkItem = nil
+        isRunning = false
+        captureStartInFlight = false
+        resetQueuedFrames()
+        lastSentSourceTime = .invalid
+        lastOutputColor = nil
+        lastEmitDate = nil
+        captureService.stop()
+        // The service resolves CGMainDisplayID again when it starts. Let the
+        // previous ScreenCaptureKit stream finish stopping first.
+        scheduleCaptureRestart(after: 0.5)
+    }
+
+    private func notifyCaptureInterrupted() {
+        Task { @MainActor [weak self] in
+            self?.captureInterruptedHandler?()
         }
     }
 

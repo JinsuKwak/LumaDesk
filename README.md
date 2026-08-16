@@ -95,6 +95,8 @@ The Displays settings tab can sync external monitor brightness to the Mac built-
 - Reconnected monitors are restored to connected/synced state.
 - Uses a vendored minimal AppleSiliconDDC-derived DDC/CI path for external display luminance writes.
 - Uses DDC VCP `0x10` luminance for external display brightness.
+- Input switching uses a custom packet source address and VCP code per monitor. Named profiles then assign an independent input value to any subset of connected monitors, with one profile selected as the menu-bar default.
+- A switch result of `Sent` confirms that the I²C command was accepted by macOS' transport. It does not claim visual confirmation because switching away from the Mac can immediately remove the monitor's DDC link.
 - Includes the upstream AppleSiliconDDC MIT license in `LumaDesk/Vendor/AppleSiliconDDC/LICENSE`.
 
 Display brightness sync depends on monitor, cable, and port support for DDC/CI. Some monitors require DDC/CI to be enabled in the monitor OSD.

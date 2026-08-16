@@ -31,6 +31,10 @@ private enum SettingsTab: CaseIterable, Hashable {
 struct SettingsRootView: View {
     @EnvironmentObject private var appState: AppStateStore
     @State private var selection: SettingsTab = .general
+    @State private var monitorDDCDrafts: [String: MonitorDDCConfiguration] = [:]
+    @State private var switchingProfileDrafts: [DisplaySwitchingProfile] = []
+    @State private var defaultSwitchingProfileID: UUID?
+    @State private var unlockedDDCDisplays = Set<String>()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -44,6 +48,10 @@ struct SettingsRootView: View {
         .frame(minWidth: 720, minHeight: 560)
         .onAppear {
             appState.refreshPermissions()
+            loadDisplaySwitchDrafts(appState.displaySyncSnapshots)
+        }
+        .onChange(of: appState.displaySyncSnapshots) { _, snapshots in
+            loadDisplaySwitchDrafts(snapshots)
         }
     }
 
@@ -255,6 +263,24 @@ struct SettingsRootView: View {
                 )
 
                 Text("Enable manually in macOS Settings, then return here.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Capture interruption") {
+                Picker(
+                    "When the main display disconnects",
+                    selection: Binding(
+                        get: { appState.preferences.dynamic.captureLossBehavior },
+                        set: appState.setDynamicCaptureLossBehavior
+                    )
+                ) {
+                    ForEach(DynamicCaptureLossBehavior.allCases) { behavior in
+                        Text(behavior.title).tag(behavior)
+                    }
+                }
+
+                Text("Dynamic capture retries automatically after macOS assigns a new main display or the display reconnects.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -512,15 +538,11 @@ struct SettingsRootView: View {
                 }
 
                 HStack {
-                    Text("Display attach/detach is event-based. Polling only watches built-in brightness.")
+                    Text("Input status is refreshed every second when the display still answers DDC.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
                     Spacer()
-
-                    Button("Switch Away") {
-                        appState.switchDisplaysAway()
-                    }
 
                     Button("Refresh") {
                         appState.refreshDisplaySync()
@@ -536,11 +558,53 @@ struct SettingsRootView: View {
                     ForEach(appState.displaySyncSnapshots) { snapshot in
                         displaySyncRow(snapshot)
                     }
+
+                    HStack {
+                        Text("Unlock DDC/CI fields to edit. Nothing is applied until saved.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button("Save Display Settings") {
+                            appState.saveDisplaySwitchSettings(
+                                monitorConfigurations: monitorDDCDrafts,
+                                switchingProfiles: switchingProfileDrafts,
+                                defaultProfileID: defaultSwitchingProfileID
+                            )
+                            unlockedDDCDisplays.removeAll()
+                        }
+                        .disabled(!hasUnsavedDisplaySwitchChanges || !areProfileNamesValid)
+                    }
+                    .padding(.top, 4)
                 }
             }
 
-            Section("Backend") {
-                Text("Uses a vendored minimal AppleSiliconDDC path for DDC/CI luminance writes. Unsupported displays stay visible for this app session only.")
+            Section("Switching Profiles") {
+                if switchingProfileDrafts.isEmpty {
+                    Text("Add a profile to choose which connected monitors should change input together.")
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(switchingProfileDrafts.indices, id: \.self) { index in
+                    switchingProfileRow(index)
+                }
+
+                Button {
+                    addSwitchingProfile()
+                } label: {
+                    Label("Add Profile", systemImage: "plus")
+                }
+
+                if !areProfileNamesValid {
+                    Text("Profile names must be unique and cannot be empty.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            Section("DDC/CI") {
+                Text("Source is the DDC packet source address, not a monitor input. VCP is the command code used for every profile on that monitor.")
                     .foregroundStyle(.secondary)
             }
         }
@@ -615,69 +679,302 @@ struct SettingsRootView: View {
     }
 
     private func displaySyncRow(_ snapshot: DisplaySyncSnapshot) -> some View {
-        HStack(spacing: 12) {
+        let configuration = monitorDDCDraft(for: snapshot)
+        let isUnlocked = unlockedDDCDisplays.contains(snapshot.id)
+
+        return HStack(alignment: .center, spacing: 12) {
             Image(systemName: "display")
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(snapshot.name)
-                    .font(.system(size: 13, weight: .medium))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .center, spacing: 12) {
+                    Text(snapshot.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
 
-                Text(displaySyncDetailText(snapshot))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                    Spacer(minLength: 12)
 
-            Spacer()
+                    labeledHexField(
+                        "Source",
+                        value: hexBinding(
+                            value: configuration.packetSourceAddress,
+                            onSet: { value in
+                                updateDDCDraft(forDisplayID: snapshot.id) { $0.packetSourceAddress = value }
+                            }
+                        ),
+                        width: 44
+                    )
+                    .disabled(!isUnlocked)
 
-            VStack(alignment: .trailing, spacing: 5) {
-                Menu {
-                    Button("None") {
-                        appState.setAwayInput(nil, forDisplayID: snapshot.id)
-                    }
+                    labeledHexField(
+                        "VCP",
+                        value: hexBinding(
+                            value: configuration.vcpCode,
+                            onSet: { value in
+                                updateDDCDraft(forDisplayID: snapshot.id) { $0.vcpCode = value }
+                            }
+                        ),
+                        width: 44
+                    )
+                    .disabled(!isUnlocked)
 
-                    Divider()
-
-                    ForEach(DisplayInputSource.allCases) { source in
-                        Button(source.title) {
-                            appState.setAwayInput(source, forDisplayID: snapshot.id)
+                    Button {
+                        if isUnlocked {
+                            unlockedDDCDisplays.remove(snapshot.id)
+                        } else {
+                            unlockedDDCDisplays.insert(snapshot.id)
                         }
+                    } label: {
+                        Image(systemName: isUnlocked ? "lock.open" : "lock")
+                            .font(.system(size: 12, weight: .medium))
                     }
-                } label: {
-                    Text(snapshot.awayInput.map { "Away \($0.shortTitle)" } ?? "Away")
-                        .font(.caption)
+                    .buttonStyle(.plain)
+                    .frame(width: 22, height: 22, alignment: .center)
+                    .contentShape(Rectangle())
+                    .help(isUnlocked ? "Lock DDC/CI settings" : "Unlock DDC/CI settings")
                 }
-                .frame(width: 92, alignment: .trailing)
 
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(snapshot.state.tint)
-                        .frame(width: 8, height: 8)
-
-                    Text(snapshot.state.label)
+                HStack(alignment: .center, spacing: 8) {
+                    Text("Display \(snapshot.displayNumber) · \(displaySyncDetailText(snapshot))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 12)
+
+                    HStack(alignment: .center, spacing: 5) {
+                        Circle()
+                            .fill(snapshot.state.tint)
+                            .frame(width: 7, height: 7)
+
+                        Text(snapshot.state.label)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .help(displayInputStatusText(snapshot))
                 }
             }
-            .frame(minWidth: 100, alignment: .trailing)
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func displaySyncDetailText(_ snapshot: DisplaySyncSnapshot) -> String {
+        if let lastBrightnessPercent = snapshot.lastBrightnessPercent {
+            return lastBrightnessPercent.formatted(.percent.precision(.fractionLength(0)))
+        }
+
+        return "Not synced"
+    }
+
+    private func displayInputStatusText(_ snapshot: DisplaySyncSnapshot) -> String {
+        if let currentInputCode = snapshot.currentInputCode {
+            return "Current input: \(DisplayInputSource.title(for: currentInputCode))"
+        }
+
+        return "Current input unavailable"
+    }
+
+    private var hasUnsavedDisplaySwitchChanges: Bool {
+        monitorDDCDrafts != appState.preferences.displaySync.monitorDDCConfigurations
+            || switchingProfileDrafts != appState.preferences.displaySync.switchingProfiles
+            || defaultSwitchingProfileID != appState.preferences.displaySync.defaultSwitchingProfileID
+    }
+
+    private func loadDisplaySwitchDrafts(_ snapshots: [DisplaySyncSnapshot]) {
+        for snapshot in snapshots where monitorDDCDrafts[snapshot.id] == nil {
+            monitorDDCDrafts[snapshot.id] = snapshot.ddcConfiguration
+        }
+        if switchingProfileDrafts.isEmpty {
+            switchingProfileDrafts = appState.preferences.displaySync.switchingProfiles
+            defaultSwitchingProfileID = appState.preferences.displaySync.defaultSwitchingProfileID
+        }
+    }
+
+    private func monitorDDCDraft(for snapshot: DisplaySyncSnapshot) -> MonitorDDCConfiguration {
+        monitorDDCDrafts[snapshot.id] ?? snapshot.ddcConfiguration
+    }
+
+    private func updateDDCDraft(forDisplayID displayID: String, update: (inout MonitorDDCConfiguration) -> Void) {
+        var configuration = monitorDDCDrafts[displayID] ?? .standardDefault
+        update(&configuration)
+        monitorDDCDrafts[displayID] = configuration
+    }
+
+    private func switchingProfileRow(_ index: Int) -> some View {
+        let profile = switchingProfileDrafts[index]
+        let isDefault = defaultSwitchingProfileID == profile.id
+
+        return VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .center, spacing: 0) {
+                Button {
+                    defaultSwitchingProfileID = profile.id
+                } label: {
+                    Image(systemName: isDefault ? "star.fill" : "star")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isDefault ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .frame(width: 22, height: 22, alignment: .center)
+                .contentShape(Rectangle())
+                .help(isDefault ? "Default switching profile" : "Make default switching profile")
+
+                TextField("", text: Binding(
+                    get: { switchingProfileDrafts[index].name },
+                    set: { switchingProfileDrafts[index].name = $0 }
+                ))
+                .labelsHidden()
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .multilineTextAlignment(.leading)
+                .padding(.leading, 3)
+                .frame(width: 300)
+
+                Spacer(minLength: 10)
+
+                Button(role: .destructive) {
+                    let removedID = switchingProfileDrafts[index].id
+                    switchingProfileDrafts.remove(at: index)
+                    if defaultSwitchingProfileID == removedID {
+                        defaultSwitchingProfileID = switchingProfileDrafts.first?.id
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .frame(width: 22, height: 22, alignment: .center)
+                .contentShape(Rectangle())
+                .help("Delete profile")
+            }
+
+            ForEach(appState.displaySyncSnapshots) { snapshot in
+                HStack(alignment: .center, spacing: 7) {
+                    Toggle("", isOn: profileAssignmentEnabledBinding(profileIndex: index, displayID: snapshot.id))
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
+
+                    Text("Display \(snapshot.displayNumber) ·")
+                        .font(.caption)
+                        .fixedSize(horizontal: true, vertical: false)
+
+                    Text(snapshot.name)
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(-1)
+
+                    Spacer(minLength: 8)
+
+                    labeledHexField(
+                        "Input",
+                        value: profileInputBinding(profileIndex: index, displayID: snapshot.id),
+                        width: 58
+                    )
+                    .disabled(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil)
+                    .opacity(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil ? 0.45 : 1)
+                }
+                .padding(.leading, 14)
+            }
         }
         .padding(.vertical, 4)
     }
 
-    private func displaySyncDetailText(_ snapshot: DisplaySyncSnapshot) -> String {
-        var parts: [String] = []
+    private var areProfileNamesValid: Bool {
+        let names = switchingProfileDrafts.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        return !names.contains(where: \.isEmpty) && Set(names).count == names.count
+    }
 
-        if let lastBrightnessPercent = snapshot.lastBrightnessPercent {
-            parts.append(lastBrightnessPercent.formatted(.percent.precision(.fractionLength(0))))
+    private func addSwitchingProfile() {
+        let existingNames = Set(switchingProfileDrafts.map { $0.name.lowercased() })
+        var number = 1
+        var name = "Profile \(number)"
+        while existingNames.contains(name.lowercased()) {
+            number += 1
+            name = "Profile \(number)"
         }
 
-        if let currentInputCode = snapshot.currentInputCode {
-            parts.append("Input \(DisplayInputSource.title(for: currentInputCode))")
+        let profile = DisplaySwitchingProfile(name: name)
+        switchingProfileDrafts.append(profile)
+        if defaultSwitchingProfileID == nil {
+            defaultSwitchingProfileID = profile.id
         }
+    }
 
-        return parts.isEmpty ? "Not synced" : parts.joined(separator: " · ")
+    private func profileAssignmentEnabledBinding(profileIndex: Int, displayID: String) -> Binding<Bool> {
+        Binding(
+            get: { switchingProfileDrafts[profileIndex].inputAssignments[displayID] != nil },
+            set: { enabled in
+                if enabled {
+                    switchingProfileDrafts[profileIndex].inputAssignments[displayID] = DisplayInputSource.displayPort1.rawValue
+                } else {
+                    switchingProfileDrafts[profileIndex].inputAssignments.removeValue(forKey: displayID)
+                }
+            }
+        )
+    }
+
+    private func profileInputBinding(profileIndex: Int, displayID: String) -> Binding<String> {
+        Binding(
+            get: { String(format: "%04X", switchingProfileDrafts[profileIndex].inputAssignments[displayID] ?? 0) },
+            set: { text in
+                guard let value = parseHex(text), value <= UInt32(UInt16.max) else { return }
+                switchingProfileDrafts[profileIndex].inputAssignments[displayID] = UInt16(value)
+            }
+        )
+    }
+
+    private func hexField(_ title: String, value: Binding<String>, width: CGFloat) -> some View {
+        TextField(title, text: value)
+            .labelsHidden()
+            .textFieldStyle(.roundedBorder)
+            .font(.caption.monospacedDigit())
+            .multilineTextAlignment(.center)
+            .controlSize(.small)
+            .frame(width: width, height: 22)
+    }
+
+    private func labeledHexField(_ title: String, value: Binding<String>, width: CGFloat) -> some View {
+        HStack(alignment: .center, spacing: 0) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+
+            hexField("", value: value, width: width)
+                .padding(.leading, 5)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func hexBinding(value: UInt16, onSet: @escaping (UInt16) -> Void) -> Binding<String> {
+        Binding(
+            get: { String(format: "%04X", value) },
+            set: { text in
+                guard let parsed = parseHex(text), parsed <= UInt32(UInt16.max) else { return }
+                onSet(UInt16(parsed))
+            }
+        )
+    }
+
+    private func hexBinding(value: UInt8, onSet: @escaping (UInt8) -> Void) -> Binding<String> {
+        Binding(
+            get: { String(format: "%02X", value) },
+            set: { text in
+                guard let parsed = parseHex(text), parsed <= UInt32(UInt8.max) else { return }
+                onSet(UInt8(parsed))
+            }
+        )
+    }
+
+    private func parseHex(_ text: String) -> UInt32? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let digits = trimmed.lowercased().hasPrefix("0x") ? String(trimmed.dropFirst(2)) : trimmed
+        return UInt32(digits, radix: 16)
     }
 
     private func sourceStatusColor(_ status: String) -> Color {

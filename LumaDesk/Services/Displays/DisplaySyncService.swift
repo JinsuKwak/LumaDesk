@@ -7,10 +7,12 @@ final class DisplaySyncService {
 
     private let brightnessBackend: DisplayBrightnessBackend
     private let builtInBrightnessProvider: BuiltInBrightnessProvider
+    private let inputSwitchingService: DisplayInputSwitchingService
     private let reconfigurationObserver = DisplayReconfigurationObserver()
 
     private var settings = DisplaySyncSettings()
     private var pollingTask: Task<Void, Never>?
+    private var inputPollingTask: Task<Void, Never>?
     private var debounceTask: Task<Void, Never>?
     private var syncInFlight = false
     private var switchAwayInFlight = false
@@ -21,15 +23,18 @@ final class DisplaySyncService {
 
     init(
         brightnessBackend: DisplayBrightnessBackend = AppleSiliconDDCDisplayBrightnessBackend(),
+        inputSwitchBackend: DisplayInputSwitchBackend = AppleSiliconDDCDisplayBrightnessBackend(),
         builtInBrightnessProvider: BuiltInBrightnessProvider = MacBuiltInBrightnessProvider()
     ) {
         self.brightnessBackend = brightnessBackend
+        inputSwitchingService = DisplayInputSwitchingService(backend: inputSwitchBackend)
         self.builtInBrightnessProvider = builtInBrightnessProvider
     }
 
     func configure(_ settings: DisplaySyncSettings) {
         generation += 1
         self.settings = settings
+        startInputPollingIfNeeded()
 
         if settings.isEnabled {
             statusHandler?("Scanning")
@@ -38,7 +43,9 @@ final class DisplaySyncService {
         } else {
             stop()
             statusHandler?("Off")
-            publishSnapshots()
+            Task { [weak self] in
+                await self?.reconcileDisplays()
+            }
         }
     }
 
@@ -55,14 +62,15 @@ final class DisplaySyncService {
         }
     }
 
-    func switchAway() {
+    func switchAway(profileID: UUID? = nil) {
         guard !switchAwayInFlight else { return }
 
         switchAwayInFlight = true
-        statusHandler?("Switch Away")
+        let selectedProfileID = profileID ?? settings.defaultSwitchingProfileID
+        statusHandler?("Switching")
 
         Task { [weak self] in
-            await self?.performSwitchAway()
+            await self?.performSwitchProfile(profileID: selectedProfileID)
         }
     }
 
@@ -70,9 +78,12 @@ final class DisplaySyncService {
         debounceTask?.cancel()
         pollingTask?.cancel()
         pollingTask = nil
+        inputPollingTask?.cancel()
+        inputPollingTask = nil
     }
 
     func handleSystemWake() {
+        startInputPollingIfNeeded()
         guard settings.isEnabled else { return }
         startIfNeeded()
         requestRescan(delay: 2.5)
@@ -99,6 +110,22 @@ final class DisplaySyncService {
         }
     }
 
+    /// Input state uses a fixed, read-only 1 Hz refresh independently from the
+    /// brightness-sync rate. A monitor switched to another host can stop
+    /// answering DDC, in which case its input is simply unknown.
+    private func startInputPollingIfNeeded() {
+        guard inputPollingTask == nil else { return }
+
+        inputPollingTask = Task { [weak self] in
+            guard let self else { return }
+            await self.reconcileDisplays()
+            while !Task.isCancelled {
+                await self.refreshCurrentInputs()
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
     private func stop() {
         generation += 1
         debounceTask?.cancel()
@@ -113,6 +140,22 @@ final class DisplaySyncService {
         for id in sessions.keys {
             sessions[id]?.state = .disabled
         }
+    }
+
+    private func refreshCurrentInputs() async {
+        guard !switchAwayInFlight else { return }
+
+        for id in sessions.keys.sorted() {
+            guard let session = sessions[id], session.isConnected, let target = session.target else { continue }
+            let currentInputCode = await inputSwitchingService.readCurrentStandardInput(on: target)
+
+            // Another actor task can update this session while the DDC read is
+            // suspended. Re-fetch it instead of writing back a stale full copy.
+            guard var latestSession = sessions[id], latestSession.isConnected else { continue }
+            latestSession.currentInputCode = currentInputCode
+            sessions[id] = latestSession
+        }
+        publishSnapshots()
     }
 
     private func requestRescan(delay: TimeInterval) {
@@ -240,6 +283,7 @@ final class DisplaySyncService {
         for target in discoveredDisplays {
             if var existing = sessions[target.id] {
                 existing.name = target.name
+                existing.displayNumber = target.displayNumber
                 existing.target = target
                 existing.isConnected = true
                 existing.lastSeen = now
@@ -251,6 +295,7 @@ final class DisplaySyncService {
                 sessions[target.id] = ManagedDisplaySession(
                     id: target.id,
                     name: target.name,
+                    displayNumber: target.displayNumber,
                     target: target,
                     isConnected: true,
                     state: settings.isEnabled ? .ready : .disabled,
@@ -258,7 +303,14 @@ final class DisplaySyncService {
                 )
             }
 
-            sessions[target.id]?.currentInputCode = await brightnessBackend.readInputSourceCode(target)
+            // Never keep Dictionary.subscript's modify access alive across an
+            // await. The independent 1 Hz input poll can otherwise re-enter this
+            // actor and mutate `sessions`, invalidating the dictionary storage.
+            let currentInputCode = await inputSwitchingService.readCurrentStandardInput(on: target)
+            if var latestSession = sessions[target.id], latestSession.isConnected {
+                latestSession.currentInputCode = currentInputCode
+                sessions[target.id] = latestSession
+            }
         }
 
         publishSnapshots()
@@ -278,21 +330,28 @@ final class DisplaySyncService {
         publishSnapshots()
     }
 
-    private func performSwitchAway() async {
+    private func performSwitchProfile(profileID: UUID?) async {
         while syncInFlight, !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
 
         await reconcileDisplays()
 
-        let assignments = settings.awayInputAssignments
-        let displayIDs = sessions.keys.sorted()
+        guard let profileID,
+              let profile = settings.switchingProfiles.first(where: { $0.id == profileID })
+        else {
+            statusHandler?("Set a default profile")
+            switchAwayInFlight = false
+            return
+        }
+
+        let displayIDs = profile.inputAssignments.keys.sorted()
         var attemptedSwitch = false
         var successfulSwitch = false
 
         for id in displayIDs {
             guard !Task.isCancelled else { break }
-            guard let source = assignments[id] else { continue }
+            guard let inputValue = profile.inputAssignments[id] else { continue }
             guard var session = sessions[id], session.isConnected, let target = session.target else { continue }
 
             attemptedSwitch = true
@@ -301,28 +360,21 @@ final class DisplaySyncService {
             sessions[id] = session
             publishSnapshots()
 
-            let currentInputCode = await brightnessBackend.readInputSourceCode(target)
-            session.currentInputCode = currentInputCode
-
-            if currentInputCode == source.rawValue {
-                session.state = .away
-                session.lastSeen = Date()
-                session.lastError = nil
-                sessions[id] = session
-                successfulSwitch = true
-                publishSnapshots()
-                continue
-            }
-
-            let didWrite = await sendInputSwitchCommand(target, code: source.rawValue)
+            let configuration = settings.monitorDDCConfigurations[id] ?? .standardDefault
+            let result = await inputSwitchingService.switchInput(on: target, configuration: configuration, value: inputValue)
 
             session.lastSeen = Date()
 
-            if didWrite {
+            switch result {
+            case .alreadySelected:
+                session.state = .away
+                session.lastError = nil
+                successfulSwitch = true
+            case .sent:
                 session.state = .sent
                 session.lastError = nil
                 successfulSwitch = true
-            } else {
+            case .failed:
                 session.state = .error("Input failed")
                 session.lastError = "Input failed"
             }
@@ -332,11 +384,11 @@ final class DisplaySyncService {
         }
 
         if successfulSwitch {
-            statusHandler?("Away sent")
+            statusHandler?("\(profile.name) sent")
         } else if attemptedSwitch {
-            statusHandler?("Away failed")
+            statusHandler?("\(profile.name) failed")
         } else {
-            statusHandler?("Set Away input")
+            statusHandler?("No monitors in \(profile.name)")
         }
 
         switchAwayInFlight = false
@@ -347,20 +399,6 @@ final class DisplaySyncService {
         }
     }
 
-    private func sendInputSwitchCommand(_ target: DisplayBrightnessTarget, code: UInt16) async -> Bool {
-        for attempt in 0 ..< 2 {
-            if attempt > 0 {
-                try? await Task.sleep(nanoseconds: 450_000_000)
-            }
-
-            if await brightnessBackend.setInputSourceCode(target, code: code) {
-                return true
-            }
-        }
-
-        return false
-    }
-
     private func publishSnapshots() {
         let snapshots = sessions.values
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -368,10 +406,11 @@ final class DisplaySyncService {
                 DisplaySyncSnapshot(
                     id: $0.id,
                     name: $0.name,
+                    displayNumber: $0.displayNumber,
                     state: $0.state,
                     lastBrightnessPercent: $0.lastBrightnessPercent,
                     lastSeen: $0.lastSeen,
-                    awayInput: settings.awayInputAssignments[$0.id],
+                    ddcConfiguration: settings.monitorDDCConfigurations[$0.id] ?? .standardDefault,
                     currentInputCode: $0.currentInputCode
                 )
             }
@@ -383,6 +422,7 @@ final class DisplaySyncService {
 private struct ManagedDisplaySession {
     var id: String
     var name: String
+    var displayNumber: Int
     var target: DisplayBrightnessTarget?
     var isConnected: Bool
     var state: DisplaySyncDisplayState

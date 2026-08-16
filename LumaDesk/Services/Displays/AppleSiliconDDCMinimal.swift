@@ -117,6 +117,7 @@ enum AppleSiliconDDCMinimal {
         service: IOAVService?,
         command: UInt8,
         value: UInt16,
+        packetSourceAddress: UInt8 = ddcDataAddress,
         writeSleepTime: UInt32 = 10_000,
         writeCycles: UInt8 = 2,
         retryAttempts: UInt8 = 4,
@@ -128,6 +129,7 @@ enum AppleSiliconDDCMinimal {
             service: service,
             send: &send,
             reply: &reply,
+            packetSourceAddress: packetSourceAddress,
             writeSleepTime: writeSleepTime,
             writeCycles: writeCycles,
             retryAttempts: retryAttempts,
@@ -139,6 +141,7 @@ enum AppleSiliconDDCMinimal {
         service: IOAVService?,
         send: inout [UInt8],
         reply: inout [UInt8],
+        packetSourceAddress: UInt8 = ddcDataAddress,
         writeSleepTime: UInt32 = 10_000,
         writeCycles: UInt8 = 2,
         readSleepTime: UInt32 = 50_000,
@@ -149,7 +152,7 @@ enum AppleSiliconDDCMinimal {
 
         var packet = [UInt8(0x80 | (send.count + 1)), UInt8(send.count)] + send + [0]
         packet[packet.count - 1] = checksum(
-            chk: send.count == 1 ? ddc7BitAddress << 1 : ddc7BitAddress << 1 ^ ddcDataAddress,
+            chk: send.count == 1 ? ddc7BitAddress << 1 : ddc7BitAddress << 1 ^ packetSourceAddress,
             data: &packet,
             start: 0,
             end: packet.count - 2
@@ -163,7 +166,7 @@ enum AppleSiliconDDCMinimal {
                 success = IOAVServiceWriteI2C(
                     service,
                     UInt32(ddc7BitAddress),
-                    UInt32(ddcDataAddress),
+                    UInt32(packetSourceAddress),
                     &packet,
                     UInt32(packet.count)
                 ) == KERN_SUCCESS

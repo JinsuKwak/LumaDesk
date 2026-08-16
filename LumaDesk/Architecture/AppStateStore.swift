@@ -63,6 +63,10 @@ final class AppStateStore: ObservableObject {
             self?.sendDynamicColor(color)
         }
 
+        dynamicLightingEngine.captureInterruptedHandler = { [weak self] in
+            self?.handleDynamicCaptureInterruption()
+        }
+
         displaySyncService.snapshotsHandler = { [weak self] snapshots in
             self?.displaySyncSnapshots = snapshots
         }
@@ -161,6 +165,12 @@ final class AppStateStore: ObservableObject {
         if isDynamicOutputActive {
             dynamicLightingEngine.update(configuration: currentDynamicConfiguration)
         }
+    }
+
+    func setDynamicCaptureLossBehavior(_ behavior: DynamicCaptureLossBehavior) {
+        guard preferences.dynamic.captureLossBehavior != behavior else { return }
+        preferences.dynamic.captureLossBehavior = behavior
+        persist()
     }
 
     func setStaticHue(_ hue: Double) {
@@ -475,19 +485,31 @@ final class AppStateStore: ObservableObject {
         displaySyncService.configure(preferences.displaySync)
     }
 
-    func setAwayInput(_ source: DisplayInputSource?, forDisplayID displayID: String) {
-        if let source {
-            preferences.displaySync.awayInputAssignments[displayID] = source
-        } else {
-            preferences.displaySync.awayInputAssignments.removeValue(forKey: displayID)
+    func saveDisplaySwitchSettings(
+        monitorConfigurations: [String: MonitorDDCConfiguration],
+        switchingProfiles: [DisplaySwitchingProfile],
+        defaultProfileID: UUID?
+    ) {
+        let normalizedProfiles = switchingProfiles.map { profile in
+            var normalized = profile
+            normalized.name = normalized.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return normalized
         }
+        let names = normalizedProfiles.map { $0.name.lowercased() }
+        guard !names.contains(where: \.isEmpty), Set(names).count == names.count else { return }
 
+        preferences.displaySync.monitorDDCConfigurations = monitorConfigurations
+        preferences.displaySync.switchingProfiles = normalizedProfiles
+        preferences.displaySync.defaultSwitchingProfileID = normalizedProfiles.contains(where: { $0.id == defaultProfileID })
+            ? defaultProfileID
+            : normalizedProfiles.first?.id
         persist()
+        // Configuration changes are applied once, after the explicit Save action.
         displaySyncService.configure(preferences.displaySync)
     }
 
-    func switchDisplaysAway() {
-        displaySyncService.switchAway()
+    func switchDisplaysAway(profileID: UUID? = nil) {
+        displaySyncService.switchAway(profileID: profileID)
     }
 
     func refreshDisplaySync() {
@@ -597,6 +619,18 @@ final class AppStateStore: ObservableObject {
         }
 
         dynamicLightingEngine.start(configuration: currentDynamicConfiguration)
+    }
+
+    private func handleDynamicCaptureInterruption() {
+        // The engine has stopped emitting frames before this callback. Keeping the
+        // last colour therefore requires no write at all; the BLE light naturally
+        // remains on its last successful value until a recovered capture emits a
+        // new frame.
+        guard isDynamicOutputActive else { return }
+        guard preferences.dynamic.captureLossBehavior == .turnLightOff else { return }
+
+        bleDeviceManager.turnOff()
+        captureDiagnostics.ledColor = .black
     }
 
     private func sendStaticColor() {

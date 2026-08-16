@@ -317,6 +317,20 @@ struct GeneralSettings: Codable, Equatable {
     }
 }
 
+enum DynamicCaptureLossBehavior: String, Codable, CaseIterable, Identifiable {
+    case keepLastColor
+    case turnLightOff
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .keepLastColor: "Keep last color"
+        case .turnLightOff: "Turn light off"
+        }
+    }
+}
+
 struct DynamicSettings: Codable, Equatable {
     var updateRate: Int = 12
     var smoothing: Double = 0.32
@@ -330,6 +344,7 @@ struct DynamicSettings: Codable, Equatable {
     var mutedDarkOffEnabled: Bool = true
     var mutedDarkLuminanceThreshold: Double = 0.12
     var mutedDarkSaturationThreshold: Double = 0.12
+    var captureLossBehavior: DynamicCaptureLossBehavior = .keepLastColor
 
     enum CodingKeys: String, CodingKey {
         case updateRate
@@ -344,6 +359,7 @@ struct DynamicSettings: Codable, Equatable {
         case mutedDarkOffEnabled
         case mutedDarkLuminanceThreshold
         case mutedDarkSaturationThreshold
+        case captureLossBehavior
     }
 
     init() {}
@@ -362,6 +378,7 @@ struct DynamicSettings: Codable, Equatable {
         mutedDarkOffEnabled = try container.decodeIfPresent(Bool.self, forKey: .mutedDarkOffEnabled) ?? true
         mutedDarkLuminanceThreshold = try container.decodeIfPresent(Double.self, forKey: .mutedDarkLuminanceThreshold) ?? 0.12
         mutedDarkSaturationThreshold = try container.decodeIfPresent(Double.self, forKey: .mutedDarkSaturationThreshold) ?? 0.12
+        captureLossBehavior = try container.decodeIfPresent(DynamicCaptureLossBehavior.self, forKey: .captureLossBehavior) ?? .keepLastColor
     }
 }
 
@@ -474,14 +491,128 @@ enum DisplayInputSource: UInt16, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// The transport/command convention used to change an external display's active input.
+/// The LG option follows its undocumented DDC2AB side channel; it is intentionally
+/// explicit rather than an automatic fallback because most displays cannot confirm a
+/// successful switch after their current video link is disconnected.
+enum DisplayInputSwitchMethod: String, Codable, CaseIterable, Identifiable {
+    case standardDDCCI
+    case lgDDC2AB
+    case customVCP
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .standardDDCCI: "Standard DDC/CI"
+        case .lgDDC2AB: "LG DDC2AB"
+        case .customVCP: "Custom VCP"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .standardDDCCI: "Source 0x51 · VCP 0x60"
+        case .lgDDC2AB: "Source 0x50 · VCP 0xF4"
+        case .customVCP: "Custom source address, VCP, and value"
+        }
+    }
+}
+
+/// Legacy per-monitor switch setting. Kept only to migrate preferences written by
+/// older LumaDesk builds.
+struct DisplaySwitchProfile: Codable, Equatable {
+    var method: DisplayInputSwitchMethod = .standardDDCCI
+    var awayInputCode: UInt16 = DisplayInputSource.displayPort1.rawValue
+    var customPacketSourceAddress: UInt8 = 0x51
+    var customVCPCode: UInt8 = 0x60
+    var retryCount: Int = 2
+    var retryDelayMilliseconds: Int = 450
+
+    static let standardDefault = DisplaySwitchProfile()
+
+    var command: DisplayInputSwitchCommand {
+        switch method {
+        case .standardDDCCI:
+            DisplayInputSwitchCommand(
+                packetSourceAddress: 0x51,
+                vcpCode: 0x60,
+                value: awayInputCode,
+                canVerifyCurrentInput: true
+            )
+        case .lgDDC2AB:
+            DisplayInputSwitchCommand(
+                packetSourceAddress: 0x50,
+                vcpCode: 0xF4,
+                value: awayInputCode,
+                canVerifyCurrentInput: false
+            )
+        case .customVCP:
+            DisplayInputSwitchCommand(
+                packetSourceAddress: customPacketSourceAddress,
+                vcpCode: customVCPCode,
+                value: awayInputCode,
+                canVerifyCurrentInput: false
+            )
+        }
+    }
+
+    var inputDescription: String {
+        "0x\(String(format: "%04X", awayInputCode))"
+    }
+}
+
+/// The DDC packet convention for one physical monitor. This belongs to the
+/// monitor, not to a switching profile: every profile can reuse it.
+struct MonitorDDCConfiguration: Codable, Equatable {
+    var packetSourceAddress: UInt8 = 0x51
+    var vcpCode: UInt8 = 0x60
+
+    static let standardDefault = MonitorDDCConfiguration()
+
+    var displayText: String {
+        "Source 0x\(String(format: "%02X", packetSourceAddress)) · VCP 0x\(String(format: "%02X", vcpCode))"
+    }
+
+    func command(value: UInt16) -> DisplayInputSwitchCommand {
+        DisplayInputSwitchCommand(
+            packetSourceAddress: packetSourceAddress,
+            vcpCode: vcpCode,
+            value: value,
+            canVerifyCurrentInput: packetSourceAddress == 0x51 && vcpCode == 0x60
+        )
+    }
+}
+
+/// A named set of monitor input destinations. An absent assignment intentionally
+/// leaves that monitor untouched when the profile is activated.
+struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
+    var id: UUID = UUID()
+    var name: String
+    var inputAssignments: [String: UInt16] = [:]
+
+    init(id: UUID = UUID(), name: String, inputAssignments: [String: UInt16] = [:]) {
+        self.id = id
+        self.name = name
+        self.inputAssignments = inputAssignments
+    }
+}
+
 struct DisplaySyncSettings: Codable, Equatable {
     var isEnabled: Bool = false
     var pollingRateHz: Double = 2
-    var awayInputAssignments: [String: DisplayInputSource] = [:]
+    var monitorDDCConfigurations: [String: MonitorDDCConfiguration] = [:]
+    var switchingProfiles: [DisplaySwitchingProfile] = []
+    var defaultSwitchingProfileID: UUID?
 
     enum CodingKeys: String, CodingKey {
         case isEnabled
         case pollingRateHz
+        case monitorDDCConfigurations
+        case switchingProfiles
+        case defaultSwitchingProfileID
+        // Legacy key, written by builds which had one "away" setting per monitor.
+        case switchProfiles
         case awayInputAssignments
     }
 
@@ -492,11 +623,45 @@ struct DisplaySyncSettings: Codable, Equatable {
         isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? false
         pollingRateHz = (try container.decodeIfPresent(Double.self, forKey: .pollingRateHz) ?? 2).clamped(to: 1 ... 10)
 
-        if let rawAssignments = try container.decodeIfPresent([String: UInt16].self, forKey: .awayInputAssignments) {
-            awayInputAssignments = rawAssignments.compactMapValues(DisplayInputSource.init(rawValue:))
-        } else {
-            awayInputAssignments = [:]
+        monitorDDCConfigurations = try container.decodeIfPresent([String: MonitorDDCConfiguration].self, forKey: .monitorDDCConfigurations) ?? [:]
+        switchingProfiles = try container.decodeIfPresent([DisplaySwitchingProfile].self, forKey: .switchingProfiles) ?? []
+        defaultSwitchingProfileID = try container.decodeIfPresent(UUID.self, forKey: .defaultSwitchingProfileID)
+
+        // Migrate the previous per-monitor method/value model into one reusable
+        // default profile. This preserves both the command convention and target.
+        if switchingProfiles.isEmpty,
+           let legacyProfiles = try container.decodeIfPresent([String: DisplaySwitchProfile].self, forKey: .switchProfiles),
+           !legacyProfiles.isEmpty
+        {
+            let assignments = legacyProfiles.mapValues(\.awayInputCode)
+            monitorDDCConfigurations = legacyProfiles.mapValues { legacy in
+                let command = legacy.command
+                return MonitorDDCConfiguration(packetSourceAddress: command.packetSourceAddress, vcpCode: command.vcpCode)
+            }
+            let profile = DisplaySwitchingProfile(name: "Default", inputAssignments: assignments)
+            switchingProfiles = [profile]
+            defaultSwitchingProfileID = profile.id
+        } else if switchingProfiles.isEmpty,
+                  let rawAssignments = try container.decodeIfPresent([String: UInt16].self, forKey: .awayInputAssignments),
+                  !rawAssignments.isEmpty
+        {
+            let profile = DisplaySwitchingProfile(name: "Default", inputAssignments: rawAssignments)
+            switchingProfiles = [profile]
+            defaultSwitchingProfileID = profile.id
         }
+
+        if defaultSwitchingProfileID == nil {
+            defaultSwitchingProfileID = switchingProfiles.first?.id
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encode(pollingRateHz, forKey: .pollingRateHz)
+        try container.encode(monitorDDCConfigurations, forKey: .monitorDDCConfigurations)
+        try container.encode(switchingProfiles, forKey: .switchingProfiles)
+        try container.encodeIfPresent(defaultSwitchingProfileID, forKey: .defaultSwitchingProfileID)
     }
 }
 
@@ -612,10 +777,11 @@ enum DisplaySyncDisplayState: Equatable {
 struct DisplaySyncSnapshot: Equatable, Identifiable {
     var id: String
     var name: String
+    var displayNumber: Int
     var state: DisplaySyncDisplayState
     var lastBrightnessPercent: Double?
     var lastSeen: Date?
-    var awayInput: DisplayInputSource?
+    var ddcConfiguration: MonitorDDCConfiguration
     var currentInputCode: UInt16?
 }
 

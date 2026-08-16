@@ -39,6 +39,11 @@ final class MenuBarController: NSObject {
         appState.switchDisplaysAway()
     }
 
+    @objc private func switchProfile(_ sender: NSMenuItem) {
+        guard let profileID = sender.representedObject as? UUID else { return }
+        appState.switchDisplaysAway(profileID: profileID)
+    }
+
     @objc private func quit() {
         NSApp.terminate(nil)
     }
@@ -96,16 +101,36 @@ final class MenuBarController: NSObject {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let switchAwayItem = NSMenuItem(title: "Switch Away", action: #selector(switchAway), keyEquivalent: "")
+        let profiles = appState.preferences.displaySync.switchingProfiles
+        let defaultProfile = profiles.first { $0.id == appState.preferences.displaySync.defaultSwitchingProfileID }
+        let switchTitle = defaultProfile.map { "Switch to \($0.name)" } ?? "Set a default profile"
+        let switchAwayItem = NSMenuItem(title: switchTitle, action: #selector(switchAway), keyEquivalent: "")
         switchAwayItem.target = self
-        switchAwayItem.isEnabled = true
+        switchAwayItem.isEnabled = defaultProfile != nil
         switchAwayItem.attributedTitle = NSAttributedString(
-            string: "Switch Away",
+            string: switchTitle,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 13, weight: .semibold)
             ]
         )
         menu.addItem(switchAwayItem)
+
+        if !profiles.isEmpty {
+            let profileMenu = NSMenu(title: "Switch Profile")
+            for profile in profiles {
+                let item = NSMenuItem(title: profile.name, action: #selector(switchProfile(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = profile.id
+                if profile.id == defaultProfile?.id {
+                    item.image = NSImage(systemSymbolName: "star.fill", accessibilityDescription: "Default profile")
+                }
+                profileMenu.addItem(item)
+            }
+
+            let profileItem = NSMenuItem(title: "Switch Profile", action: nil, keyEquivalent: "")
+            profileItem.submenu = profileMenu
+            menu.addItem(profileItem)
+        }
 
         menu.addItem(.separator())
 
