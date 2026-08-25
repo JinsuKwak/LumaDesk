@@ -603,9 +603,22 @@ struct SettingsRootView: View {
                 }
             }
 
-            Section("DDC/CI") {
+            Section {
                 Text("Source is the DDC packet source address, not a monitor input. VCP is the command code used for every profile on that monitor.")
                     .foregroundStyle(.secondary)
+            } header: {
+                Text("DDC/CI")
+            } footer: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("LG DDC2AB reference")
+                        .fontWeight(.medium)
+                    Text("Source 50 · VCP F4")
+                    Text("HDMI 1 0090 · HDMI 2 0091 · DisplayPort 00D0")
+                    Text("Enter hexadecimal values without the 0x prefix.")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
             }
         }
         .formStyle(.grouped)
