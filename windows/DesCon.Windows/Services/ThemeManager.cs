@@ -36,6 +36,11 @@ public static class ThemeManager
         var darkValue = isDark ? 1 : 0;
         NativeMethods.DwmSetWindowAttribute(handle, 20, ref darkValue, sizeof(int));
 
+        // Match the native Windows 11 frame to the app surface instead of
+        // leaving the default black one-pixel border around the window.
+        var borderColor = isDark ? 0x001E1917 : 0x00F8F5F3;
+        NativeMethods.DwmSetWindowAttribute(handle, 34, ref borderColor, sizeof(int));
+
         // DWMSBT_MAINWINDOW enables Mica on Windows 11 and is ignored cleanly
         // on Windows 10, where the semi-transparent surface colors remain.
         var backdrop = 2;

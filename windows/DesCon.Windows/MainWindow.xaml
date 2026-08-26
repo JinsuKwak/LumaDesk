@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:viewModels="clr-namespace:DesCon.Windows.ViewModels"
         Title="LumaDesk Settings" Width="1040" Height="760" MinWidth="920" MinHeight="650"
-        WindowStartupLocation="CenterScreen" Background="Transparent" Icon="Resources/DesCon.ico">
+        WindowStartupLocation="CenterScreen" Background="{DynamicResource WindowBrush}" Icon="Resources/DesCon.ico">
     <Grid Background="{DynamicResource WindowBrush}" Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="62" />
@@ -252,7 +252,7 @@
                                 <TextBlock Text="Choose monitor inputs and each computer's display behavior."
                                            Foreground="{DynamicResource SecondaryTextBrush}" />
                             </StackPanel>
-                            <Button Grid.Column="1" Content="＋  Add Profile" Click="AddProfileClicked" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="＋  Add Profile" Click="AddProfileClicked" VerticalAlignment="Center" Padding="10,4" />
                         </Grid>
 
                         <ItemsControl ItemsSource="{Binding Profiles}">
@@ -269,16 +269,19 @@
                                                 </Grid.ColumnDefinitions>
                                                 <Button Content="{Binding FavoriteGlyph}" FontSize="16" Style="{StaticResource IconButtonStyle}"
                                                         Click="FavoriteClicked" ToolTip="Make favorite" />
-                                                <TextBox Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="2,0,12,0" />
+                                                <TextBox Grid.Column="1" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="2,0,12,0"
+                                                         Padding="8,3" MinHeight="27" />
                                                 <TextBox Grid.Column="2" Text="{Binding HotKeyText}" IsReadOnly="True" PreviewKeyDown="ShortcutKeyDown"
-                                                         HorizontalContentAlignment="Center" ToolTip="Click and press a shortcut. Backspace clears it." />
+                                                         HorizontalContentAlignment="Center" ToolTip="Click and press a shortcut. Backspace clears it."
+                                                         Padding="8,3" MinHeight="27" />
                                                 <Button Grid.Column="3" Content="&#xE74D;" FontFamily="Segoe Fluent Icons" Style="{StaticResource IconButtonStyle}"
                                                         Margin="7,0,0,0" Click="DeleteProfileClicked" ToolTip="Delete profile" />
                                             </Grid>
 
-                                            <Grid Margin="38,10,0,9">
+                                            <Grid Margin="38,8,0,7">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                                                <ComboBox ItemsSource="{Binding CoordinationModes}" SelectedItem="{Binding CoordinationMode}" />
+                                                <ComboBox ItemsSource="{Binding CoordinationModes}" SelectedItem="{Binding CoordinationMode}"
+                                                          Padding="6,2" MinHeight="27" />
                                                 <TextBlock Grid.Column="1" Text="{Binding DirectionLabel}" Margin="12,0,0,0" VerticalAlignment="Center"
                                                            Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
                                             </Grid>
@@ -286,7 +289,7 @@
                                             <ItemsControl ItemsSource="{Binding Monitors}" Margin="38,0,0,0">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate DataType="{x:Type viewModels:ProfileMonitorRowViewModel}">
-                                                        <Border BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" Padding="0,9,0,3">
+                                                        <Border BorderBrush="{DynamicResource DividerBrush}" BorderThickness="0,1,0,0" Padding="0,7,0,2">
                                                             <Grid>
                                                                 <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                                                 <Grid.ColumnDefinitions>
@@ -299,10 +302,10 @@
                                                                 <TextBlock Grid.Column="1" Text="{Binding Label}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="12" />
                                                                 <TextBlock Grid.Column="2" Text="Input" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="11" />
                                                                 <TextBox Grid.Column="3" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" MaxLength="4" TextAlignment="Center"
-                                                                         Padding="5,3" MinHeight="27" />
+                                                                         Padding="4,1" MinHeight="25" />
 
                                                                 <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal"
-                                                                            HorizontalAlignment="Right" Margin="0,7,0,0">
+                                                                            HorizontalAlignment="Right" Margin="0,5,0,0">
                                                                     <TextBlock Text="Behavior" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="10" Margin="0,0,10,0" />
                                                                     <StackPanel Orientation="Horizontal">
                                                                         <StackPanel.Style>
@@ -315,10 +318,10 @@
                                                                             </Style>
                                                                         </StackPanel.Style>
                                                                         <TextBlock Text="Mac" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="10" Margin="0,0,5,0" />
-                                                                        <ComboBox Width="124" ItemsSource="{Binding MacBehaviors}" SelectedItem="{Binding MacBehavior}" Padding="5,2" MinHeight="28" />
+                                                                        <ComboBox Width="124" ItemsSource="{Binding MacBehaviors}" SelectedItem="{Binding MacBehavior}" Padding="4,1" MinHeight="25" />
                                                                     </StackPanel>
                                                                     <TextBlock Text="Windows" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="10" Margin="10,0,5,0" />
-                                                                    <ComboBox Width="134" ItemsSource="{Binding Behaviors}" SelectedItem="{Binding Behavior}" Padding="5,2" MinHeight="28" />
+                                                                    <ComboBox Width="134" ItemsSource="{Binding Behaviors}" SelectedItem="{Binding Behavior}" Padding="4,1" MinHeight="25" />
                                                                 </StackPanel>
                                                             </Grid>
                                                         </Border>
