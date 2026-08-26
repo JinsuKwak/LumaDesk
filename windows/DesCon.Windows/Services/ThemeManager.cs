@@ -45,6 +45,7 @@ public static class ThemeManager
 
     private static void SetBrush(string key, string color)
     {
-        Application.Current.Resources[key] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
+        System.Windows.Application.Current.Resources[key] = new SolidColorBrush(
+            (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(color));
     }
 }

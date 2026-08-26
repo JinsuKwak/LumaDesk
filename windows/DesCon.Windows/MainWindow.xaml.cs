@@ -51,7 +51,7 @@ public partial class MainWindow : Window
         ThemeManager.ApplyBackdrop(this, _viewModel.Theme);
     }
 
-    private void ShortcutKeyDown(object sender, KeyEventArgs e)
+    private void ShortcutKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not ProfileEditorViewModel profile) return;
         e.Handled = true;

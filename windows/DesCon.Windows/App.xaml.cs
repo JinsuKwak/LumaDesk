@@ -6,7 +6,7 @@ using Microsoft.Win32;
 
 namespace DesCon.Windows;
 
-public partial class App : Application
+public partial class App : System.Windows.Application
 {
     public static App CurrentApp => (App)Current;
     public bool IsShuttingDown { get; private set; }
