@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://descon.local/schemas/profile-document-v1.json",
+  "title": "DesCon switching profiles",
+  "type": "object",
+  "required": ["schemaVersion", "revision", "monitors", "profiles"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "monitors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/monitor" }
+    },
+    "profiles": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/profile" }
+    }
+  },
+  "$defs": {
+    "monitor": {
+      "type": "object",
+      "required": ["id", "name", "ddc"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "ddc": {
+          "type": "object",
+          "required": ["sourceAddress", "vcpCode"],
+          "properties": {
+            "sourceAddress": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "vcpCode": { "type": "integer", "minimum": 0, "maximum": 255 }
+          }
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "required": ["id", "name", "coordinationMode", "inputAssignments"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "name": { "type": "string", "minLength": 1 },
+        "coordinationMode": { "enum": ["managed", "external"] },
+        "managedTarget": { "enum": ["macOS", "windows"] },
+        "externalTargetName": { "type": "string" },
+        "inputAssignments": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 65535 }
+        },
+        "macDisplayBehaviors": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": ["unchanged", "primary", "extended", "mirrorPrimary", "handedOff"]
+          }
+        },
+        "windowsDisplayBehaviors": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": ["unchanged", "primary", "extended", "mirrorPrimary", "disabled"]
+          }
+        },
+        "macHotKey": { "$ref": "#/$defs/macHotKey" },
+        "windowsHotKey": { "$ref": "#/$defs/windowsHotKey" }
+      }
+    },
+    "macHotKey": {
+      "type": ["object", "null"],
+      "properties": {
+        "keyCode": { "type": "integer", "minimum": 0 },
+        "carbonModifiers": { "type": "integer", "minimum": 0 },
+        "displayText": { "type": "string" }
+      }
+    },
+    "windowsHotKey": {
+      "type": ["object", "null"],
+      "properties": {
+        "virtualKey": { "type": "integer", "minimum": 0 },
+        "modifiers": { "type": "integer", "minimum": 0 },
+        "displayText": { "type": "string" }
+      }
+    }
+  }
+}

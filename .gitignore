@@ -12,6 +12,12 @@ xcuserdata/
 # Swift Package Manager
 .build/
 
+# Windows / .NET
+bin/
+obj/
+*.user
+*.suo
+
 # Local environment
 *.swp
 *.tmp

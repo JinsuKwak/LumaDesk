@@ -1,6 +1,19 @@
-# LumaDesk
+# DesCon
 
-LumaDesk is a minimal macOS menu bar utility for syncing an ELK-BLEDOM / duoCo-style BLE LED strip with your desk setup. It focuses on low-friction daily use: a compact menu bar control surface, deeper settings in a separate window, and isolated device backends so BLE and display-control protocols can evolve independently from the UI.
+DesCon contains native macOS and Windows display-switching clients. The macOS client retains the original LumaDesk lighting and brightness-sync features; the Windows client is a lightweight tray utility focused on DDC input routing and display topology.
+
+```text
+macos/     SwiftUI/AppKit menu-bar app
+windows/   .NET 8 WPF tray app
+shared/    profile schema and authenticated LAN protocol
+```
+
+Managed profiles coordinate Mac and Windows directly over the local network with multicast discovery, HMAC-authenticated TCP commands, and a prepare/commit transaction. External profiles (Jetson, consoles, or any renamed target) send DDC unilaterally and never require a peer app.
+
+Both clients offer System, Light, and Dark appearance modes while retaining
+native translucent materials. Profiles are available from the macOS menu bar or
+Windows notification area and can also be assigned global shortcuts. Monitor
+settings persist against stable hardware identities instead of display numbers.
 
 ## Core Features
 
@@ -97,7 +110,7 @@ The Displays settings tab can sync external monitor brightness to the Mac built-
 - Uses DDC VCP `0x10` luminance for external display brightness.
 - Input switching uses a custom packet source address and VCP code per monitor. Named profiles then assign an independent input value to any subset of connected monitors, with one profile selected as the menu-bar default.
 - A switch result of `Sent` confirms that the I²C command was accepted by macOS' transport. It does not claim visual confirmation because switching away from the Mac can immediately remove the monitor's DDC link.
-- Includes the upstream AppleSiliconDDC MIT license in `LumaDesk/Vendor/AppleSiliconDDC/LICENSE`.
+- Includes the upstream AppleSiliconDDC MIT license in `macos/LumaDesk/Vendor/AppleSiliconDDC/LICENSE`.
 
 Display brightness sync depends on monitor, cable, and port support for DDC/CI. Some monitors require DDC/CI to be enabled in the monitor OSD.
 
@@ -128,7 +141,7 @@ This keeps UI state, screen analysis, BLE transport, DDC display control, and pe
 
 ## Build Notes
 
-Open `LumaDesk.xcodeproj` in Xcode and build the `LumaDesk` target.
+Open `macos/LumaDesk.xcodeproj` in Xcode and build the `LumaDesk` target.
 
 The project targets macOS 14 or newer. The display brightness sync path links against private macOS display APIs, so this project is intended for local/direct distribution rather than Mac App Store distribution.
 
@@ -138,6 +151,14 @@ For local command-line type checking:
 env CLANG_MODULE_CACHE_PATH=/tmp/LumaDeskModuleCache \
   xcrun --sdk macosx swiftc -typecheck \
   -target arm64-apple-macos14.0 \
-  -import-objc-header LumaDesk/Supporting/LumaDesk-Bridging-Header.h \
-  $(find LumaDesk -name '*.swift' -print)
+  -import-objc-header macos/LumaDesk/Supporting/LumaDesk-Bridging-Header.h \
+  $(find macos/LumaDesk -name '*.swift' -print)
 ```
+
+On Windows 10/11 with the .NET 8 SDK:
+
+```powershell
+dotnet build .\windows\DesCon.Windows.sln -c Release
+```
+
+The Windows client uses built-in WPF/Win32 APIs only. Standard DDC goes through DXVA2; nonstandard LG packet source `0x50` goes through the NVIDIA driver-provided `nvapi64.dll` raw I²C API.

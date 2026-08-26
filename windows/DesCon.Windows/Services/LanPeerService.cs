@@ -1,0 +1,345 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using DesCon.Windows.Models;
+
+namespace DesCon.Windows.Services;
+
+public sealed class LanPeerService : IDisposable
+{
+    private const int DiscoveryPort = 47830;
+    private const string MulticastAddress = "239.255.77.77";
+    private readonly Func<AppSettings> _settings;
+    private readonly Guid _instanceID = Guid.NewGuid();
+    private readonly object _lifecycle = new();
+    private readonly ConcurrentDictionary<Guid, WireProfile> _pending = [];
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _nonces = [];
+    private readonly ConcurrentDictionary<Guid, Peer> _peers = [];
+    private readonly JsonSerializerOptions _json = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+    };
+    private TcpListener? _listener;
+    private UdpClient? _discoveryReceiver;
+    private CancellationTokenSource? _sessionStop;
+    private string _lastStatus = "LAN peer off";
+
+    public Func<WireProfile, Task>? ProfileCommitted { get; set; }
+    public event Action<string>? StatusChanged;
+    public string PeerStatus => !_settings().Network.Enabled
+        ? "LAN peer off"
+        : BestPeer() is { } peer ? $"Connected to {peer.DeviceName}" : "Searching LAN";
+
+    public LanPeerService(Func<AppSettings> settings) => _settings = settings;
+
+    public void Start()
+    {
+        lock (_lifecycle)
+        {
+            if (!_settings().Network.Enabled)
+            {
+                StopLocked();
+                return;
+            }
+            if (_sessionStop is not null) return;
+
+            _sessionStop = new CancellationTokenSource();
+            PublishStatus("Searching LAN");
+            _ = RunTcpListener(_sessionStop.Token);
+            _ = RunDiscovery(_sessionStop.Token);
+        }
+    }
+
+    public async Task<(bool Ready, Guid TransactionID, string Detail)> PrepareAsync(SwitchingProfile profile)
+    {
+        var settings = _settings();
+        if (!settings.Network.Enabled) return (false, Guid.Empty, "LAN peer communication is disabled.");
+        if (settings.Network.SharedKey.Length < 8) return (false, Guid.Empty, "Set the same LAN pairing key on both computers.");
+        var peer = BestPeer();
+        if (peer is null) return (false, Guid.Empty, "Windows could not find the Mac peer on this LAN.");
+
+        var transactionID = Guid.NewGuid();
+        var wireProfile = WireProfile.From(profile, settings.Monitors);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new PreparePayload(transactionID, wireProfile), _json);
+        var cancellationToken = _sessionStop?.Token ?? CancellationToken.None;
+        var response = await Send(peer, "prepare", payload, cancellationToken);
+        return response.Ok
+            ? (true, transactionID, response.Detail)
+            : (false, Guid.Empty, response.Detail);
+    }
+
+    public async Task<(bool Ok, string Detail)> CommitAsync(Guid transactionID)
+    {
+        var peer = BestPeer();
+        if (peer is null) return (false, "Mac peer disappeared before commit.");
+        var payload = JsonSerializer.SerializeToUtf8Bytes(new CommitPayload(transactionID), _json);
+        var cancellationToken = _sessionStop?.Token ?? CancellationToken.None;
+        return await Send(peer, "commit", payload, cancellationToken);
+    }
+
+    public void Dispose()
+    {
+        lock (_lifecycle) StopLocked();
+    }
+
+    private void StopLocked()
+    {
+        var stop = _sessionStop;
+        _sessionStop = null;
+        stop?.Cancel();
+        _listener?.Stop();
+        _listener = null;
+        _discoveryReceiver?.Dispose();
+        _discoveryReceiver = null;
+        _peers.Clear();
+        _pending.Clear();
+        stop?.Dispose();
+        PublishStatus("LAN peer off");
+    }
+
+    private async Task RunTcpListener(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _listener = new TcpListener(IPAddress.Any, _settings().Network.CommandPort);
+            _listener.Start();
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var client = await _listener.AcceptTcpClientAsync(cancellationToken);
+                _ = HandleClient(client, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (SocketException error) { PublishStatus($"LAN error: {error.Message}"); }
+    }
+
+    private async Task HandleClient(TcpClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using (client)
+            using (var stream = client.GetStream())
+            using (var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true))
+            using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true })
+            {
+                var line = await reader.ReadLineAsync(cancellationToken);
+                var response = await Process(line);
+                await writer.WriteLineAsync(CreateEnvelope("response", JsonSerializer.SerializeToUtf8Bytes(response, _json)));
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (IOException) { }
+        catch (SocketException) { }
+    }
+
+    private async Task<PeerResponse> Process(string? line)
+    {
+        if (!_settings().Network.Enabled) return new PeerResponse(false, "LAN peer communication is disabled.");
+        if (string.IsNullOrWhiteSpace(line)) return new PeerResponse(false, "Empty request.");
+        Envelope? envelope;
+        try { envelope = JsonSerializer.Deserialize<Envelope>(line, _json); }
+        catch { return new PeerResponse(false, "Invalid request JSON."); }
+        if (envelope is null || !Verify(envelope)) return new PeerResponse(false, "Authentication failed.");
+
+        try
+        {
+            var payload = Convert.FromBase64String(envelope.Payload);
+            switch (envelope.Type)
+            {
+                case "prepare":
+                    var prepare = JsonSerializer.Deserialize<PreparePayload>(payload, _json);
+                    if (prepare is null) return new PeerResponse(false, "Invalid profile payload.");
+                    if (prepare.Profile.CoordinationMode != ProfileCoordinationMode.Managed ||
+                        prepare.Profile.ManagedTarget != ManagedProfileTarget.Windows)
+                        return new PeerResponse(false, "This profile does not target Windows.");
+                    _pending[prepare.TransactionID] = prepare.Profile;
+                    return new PeerResponse(true, "Ready");
+                case "commit":
+                    var commit = JsonSerializer.Deserialize<CommitPayload>(payload, _json);
+                    if (commit is null || !_pending.TryRemove(commit.TransactionID, out var profile))
+                        return new PeerResponse(false, "Unknown or expired transaction.");
+                    if (ProfileCommitted is not null) await ProfileCommitted(profile);
+                    return new PeerResponse(true, "Applied");
+                default:
+                    return new PeerResponse(false, "Unknown command.");
+            }
+        }
+        catch (Exception error)
+        {
+            return new PeerResponse(false, error.Message);
+        }
+    }
+
+    private async Task<(bool Ok, string Detail)> Send(Peer peer, string type, byte[] payload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+            await client.ConnectAsync(peer.Address, peer.CommandPort, timeout.Token);
+            await using var stream = client.GetStream();
+            using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
+            await using var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
+            await writer.WriteLineAsync(CreateEnvelope(type, payload));
+            var responseLine = await reader.ReadLineAsync(timeout.Token);
+            var responseEnvelope = JsonSerializer.Deserialize<Envelope>(responseLine ?? "", _json);
+            if (responseEnvelope is null || responseEnvelope.Type != "response" || !Verify(responseEnvelope))
+                return (false, "Invalid peer response.");
+            var response = JsonSerializer.Deserialize<PeerResponse>(Convert.FromBase64String(responseEnvelope.Payload), _json);
+            return response is null ? (false, "Empty peer response.") : (response.Ok, response.Detail);
+        }
+        catch (Exception error)
+        {
+            return (false, error.Message);
+        }
+    }
+
+    private async Task RunDiscovery(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _discoveryReceiver = new UdpClient(AddressFamily.InterNetwork);
+            _discoveryReceiver.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            _discoveryReceiver.Client.Bind(new IPEndPoint(IPAddress.Any, DiscoveryPort));
+            _discoveryReceiver.JoinMulticastGroup(IPAddress.Parse(MulticastAddress));
+
+            _ = Task.Run(async () =>
+            {
+                using var sender = new UdpClient(AddressFamily.InterNetwork);
+                sender.MulticastLoopback = false;
+                var endpoint = new IPEndPoint(IPAddress.Parse(MulticastAddress), DiscoveryPort);
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    if (!_settings().Network.Enabled)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
+                        continue;
+                    }
+                    var announcement = new DiscoveryAnnouncement(
+                        1,
+                        _instanceID,
+                        _settings().Network.DeviceName,
+                        "windows",
+                        _settings().Network.CommandPort);
+                    var data = JsonSerializer.SerializeToUtf8Bytes(announcement, _json);
+                    await sender.SendAsync(data, endpoint, cancellationToken);
+                    await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
+                }
+            }, cancellationToken);
+
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var packet = await _discoveryReceiver.ReceiveAsync(cancellationToken);
+                var announcement = JsonSerializer.Deserialize<DiscoveryAnnouncement>(packet.Buffer, _json);
+                if (announcement is null || announcement.InstanceID == _instanceID || announcement.Platform != "macOS") continue;
+                _peers[announcement.InstanceID] = new Peer(
+                    announcement.InstanceID,
+                    announcement.DeviceName,
+                    packet.RemoteEndPoint.Address,
+                    announcement.CommandPort,
+                    DateTimeOffset.UtcNow);
+                PublishStatus($"Connected to {announcement.DeviceName}");
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+        catch (SocketException error) { PublishStatus($"LAN error: {error.Message}"); }
+    }
+
+    private void PublishStatus(string status)
+    {
+        if (string.Equals(_lastStatus, status, StringComparison.Ordinal)) return;
+        _lastStatus = status;
+        StatusChanged?.Invoke(status);
+    }
+
+    private Peer? BestPeer()
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddSeconds(-12);
+        foreach (var stale in _peers.Where(item => item.Value.LastSeen < cutoff).Select(item => item.Key))
+            _peers.TryRemove(stale, out _);
+        return _peers.Values.OrderByDescending(item => item.LastSeen).FirstOrDefault();
+    }
+
+    private string CreateEnvelope(string type, byte[] payload)
+    {
+        var envelope = new Envelope(
+            1,
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Guid.NewGuid().ToString("N"),
+            type,
+            Convert.ToBase64String(payload),
+            "");
+        return JsonSerializer.Serialize(envelope with { Signature = Signature(envelope) }, _json);
+    }
+
+    private bool Verify(Envelope envelope)
+    {
+        try
+        {
+            if (_settings().Network.SharedKey.Length < 8) return false;
+            if (Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - envelope.Timestamp) > 30) return false;
+            if (!_nonces.TryAdd(envelope.Nonce, DateTimeOffset.UtcNow)) return false;
+            foreach (var stale in _nonces.Where(item => item.Value < DateTimeOffset.UtcNow.AddMinutes(-2)).Select(item => item.Key))
+                _nonces.TryRemove(stale, out _);
+            var expected = Signature(envelope with { Signature = "" });
+            return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(expected), Convert.FromHexString(envelope.Signature));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private string Signature(Envelope envelope)
+    {
+        var canonical = $"{envelope.Version}|{envelope.ID:D}|{envelope.Timestamp}|{envelope.Nonce}|{envelope.Type}|{envelope.Payload}";
+        var key = Encoding.UTF8.GetBytes(_settings().Network.SharedKey);
+        return Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
+
+    private sealed record Peer(Guid ID, string DeviceName, IPAddress Address, int CommandPort, DateTimeOffset LastSeen);
+    private sealed record DiscoveryAnnouncement(int Version, Guid InstanceID, string DeviceName, string Platform, int CommandPort);
+    private sealed record Envelope(int Version, Guid ID, long Timestamp, string Nonce, string Type, string Payload, string Signature);
+    private sealed record PreparePayload(Guid TransactionID, WireProfile Profile);
+    private sealed record CommitPayload(Guid TransactionID);
+    private sealed record PeerResponse(bool Ok, string Detail);
+}
+
+public sealed record WireMonitorAction(
+    string SharedID,
+    ushort? InputValue,
+    MacDisplayBehavior MacBehavior,
+    WindowsDisplayBehavior WindowsBehavior);
+
+public sealed record WireProfile(
+    Guid ID,
+    string Name,
+    ProfileCoordinationMode CoordinationMode,
+    ManagedProfileTarget ManagedTarget,
+    string ExternalTargetName,
+    IReadOnlyList<WireMonitorAction> Monitors)
+{
+    public static WireProfile From(SwitchingProfile profile, IReadOnlyCollection<MonitorDefinition> monitors)
+    {
+        var actions = new List<WireMonitorAction>();
+        foreach (var monitor in monitors)
+        {
+            var input = profile.InputAssignments.TryGetValue(monitor.Id, out var inputValue) ? inputValue : (ushort?)null;
+            var mac = profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged);
+            var windows = profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged);
+            if (input is null && mac == MacDisplayBehavior.Unchanged && windows == WindowsDisplayBehavior.Unchanged) continue;
+            actions.Add(new WireMonitorAction(monitor.SharedId, input, mac, windows));
+        }
+        return new WireProfile(profile.Id, profile.Name, profile.CoordinationMode, profile.ManagedTarget, profile.ExternalTargetName, actions);
+    }
+}
