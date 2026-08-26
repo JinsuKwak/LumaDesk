@@ -39,8 +39,8 @@
             <Setter Property="Background" Value="{DynamicResource InputBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="9,4" />
-            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="MinHeight" Value="26" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="CaretBrush" Value="{DynamicResource PrimaryTextBrush}" />
             <Setter Property="Template">
@@ -67,8 +67,14 @@
             <Setter Property="Foreground" Value="{DynamicResource PrimaryTextBrush}" />
             <Setter Property="Background" Value="{DynamicResource InputBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="MinHeight" Value="26" />
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#FF17191D" />
+            <Setter Property="Background" Value="#FFF7F7F7" />
             <Setter Property="Padding" Value="7,3" />
-            <Setter Property="MinHeight" Value="28" />
         </Style>
 
         <Style TargetType="Button">
@@ -76,7 +82,7 @@
             <Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="Padding" Value="11,4" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Center" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -115,8 +121,8 @@
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="Padding" Value="5" />
-            <Setter Property="MinWidth" Value="27" />
-            <Setter Property="MinHeight" Value="27" />
+            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="MinHeight" Value="26" />
         </Style>
 
         <Style x:Key="CardStyle" TargetType="Border">
