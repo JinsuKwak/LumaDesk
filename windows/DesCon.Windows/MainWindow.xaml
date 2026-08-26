@@ -68,6 +68,11 @@
                                 </Grid>
                                 <TextBlock Text="Use the exact same key on the Mac. At least 8 characters. Commands stay inside the LAN."
                                            TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="120,6,0,0" />
+                                <DockPanel Margin="120,10,0,0">
+                                    <Button Content="Rescan LAN" Click="RescanPeerClicked" Padding="10,5" DockPanel.Dock="Right" IsEnabled="{Binding NetworkEnabled}" />
+                                    <TextBlock Text="Peers are discovered at launch, on demand, or with Rescan. No periodic broadcast runs in the background."
+                                               TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" VerticalAlignment="Center" />
+                                </DockPanel>
                             </StackPanel>
                         </Border>
                     </StackPanel>

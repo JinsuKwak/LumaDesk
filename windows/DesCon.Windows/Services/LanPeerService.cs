@@ -19,6 +19,7 @@ public sealed class LanPeerService : IDisposable
     private readonly ConcurrentDictionary<Guid, WireProfile> _pending = [];
     private readonly ConcurrentDictionary<string, DateTimeOffset> _nonces = [];
     private readonly ConcurrentDictionary<Guid, Peer> _peers = [];
+    private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly JsonSerializerOptions _json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -61,14 +62,20 @@ public sealed class LanPeerService : IDisposable
         var settings = _settings();
         if (!settings.Network.Enabled) return (false, Guid.Empty, "LAN peer communication is disabled.");
         if (settings.Network.SharedKey.Length < 8) return (false, Guid.Empty, "Set the same LAN pairing key on both computers.");
-        var peer = BestPeer();
+        var cancellationToken = _sessionStop?.Token ?? CancellationToken.None;
+        var peer = await PeerOrDiscover(cancellationToken);
         if (peer is null) return (false, Guid.Empty, "Windows could not find the Mac peer on this LAN.");
 
         var transactionID = Guid.NewGuid();
         var wireProfile = WireProfile.From(profile, settings.Monitors);
         var payload = JsonSerializer.SerializeToUtf8Bytes(new PreparePayload(transactionID, wireProfile), _json);
-        var cancellationToken = _sessionStop?.Token ?? CancellationToken.None;
         var response = await Send(peer, "prepare", payload, cancellationToken);
+        if (!response.Ok)
+        {
+            _peers.TryRemove(peer.ID, out _);
+            if (await PeerOrDiscover(cancellationToken) is { } rediscoveredPeer)
+                response = await Send(rediscoveredPeer, "prepare", payload, cancellationToken);
+        }
         return response.Ok
             ? (true, transactionID, response.Detail)
             : (false, Guid.Empty, response.Detail);
@@ -81,6 +88,17 @@ public sealed class LanPeerService : IDisposable
         var payload = JsonSerializer.SerializeToUtf8Bytes(new CommitPayload(transactionID), _json);
         var cancellationToken = _sessionStop?.Token ?? CancellationToken.None;
         return await Send(peer, "commit", payload, cancellationToken);
+    }
+
+    public void Rescan()
+    {
+        if (!_settings().Network.Enabled)
+        {
+            PublishStatus("LAN peer off");
+            return;
+        }
+        var cancellationToken = _sessionStop?.Token ?? CancellationToken.None;
+        _ = ScanForPeers(cancellationToken, clearExisting: true);
     }
 
     public void Dispose()
@@ -210,30 +228,7 @@ public sealed class LanPeerService : IDisposable
             _discoveryReceiver.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             _discoveryReceiver.Client.Bind(new IPEndPoint(IPAddress.Any, DiscoveryPort));
             _discoveryReceiver.JoinMulticastGroup(IPAddress.Parse(MulticastAddress));
-
-            _ = Task.Run(async () =>
-            {
-                using var sender = new UdpClient(AddressFamily.InterNetwork);
-                sender.MulticastLoopback = false;
-                var endpoint = new IPEndPoint(IPAddress.Parse(MulticastAddress), DiscoveryPort);
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    if (!_settings().Network.Enabled)
-                    {
-                        await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
-                        continue;
-                    }
-                    var announcement = new DiscoveryAnnouncement(
-                        1,
-                        _instanceID,
-                        _settings().Network.DeviceName,
-                        "windows",
-                        _settings().Network.CommandPort);
-                    var data = JsonSerializer.SerializeToUtf8Bytes(announcement, _json);
-                    await sender.SendAsync(data, endpoint, cancellationToken);
-                    await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken);
-                }
-            }, cancellationToken);
+            _ = ScanForPeers(cancellationToken, clearExisting: true);
 
             while (!cancellationToken.IsCancellationRequested)
             {
@@ -247,6 +242,8 @@ public sealed class LanPeerService : IDisposable
                     announcement.CommandPort,
                     DateTimeOffset.UtcNow);
                 PublishStatus($"Connected to {announcement.DeviceName}");
+                if (string.Equals(announcement.Kind, "probe", StringComparison.OrdinalIgnoreCase))
+                    _ = SendDiscoveryAnnouncement("presence", cancellationToken);
             }
         }
         catch (OperationCanceledException) { }
@@ -263,10 +260,54 @@ public sealed class LanPeerService : IDisposable
 
     private Peer? BestPeer()
     {
-        var cutoff = DateTimeOffset.UtcNow.AddSeconds(-12);
-        foreach (var stale in _peers.Where(item => item.Value.LastSeen < cutoff).Select(item => item.Key))
-            _peers.TryRemove(stale, out _);
         return _peers.Values.OrderByDescending(item => item.LastSeen).FirstOrDefault();
+    }
+
+    private async Task<Peer?> PeerOrDiscover(CancellationToken cancellationToken)
+    {
+        if (BestPeer() is { } cached) return cached;
+        await ScanForPeers(cancellationToken, clearExisting: false);
+        return BestPeer();
+    }
+
+    private async Task ScanForPeers(CancellationToken cancellationToken, bool clearExisting)
+    {
+        await _scanGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!clearExisting && BestPeer() is not null) return;
+            if (clearExisting) _peers.Clear();
+            PublishStatus("Searching LAN");
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                await SendDiscoveryAnnouncement("probe", cancellationToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+            }
+            await Task.Delay(TimeSpan.FromMilliseconds(350), cancellationToken);
+            if (_peers.IsEmpty) PublishStatus("No Mac peer found");
+        }
+        catch (OperationCanceledException) { }
+        catch (SocketException error) { PublishStatus($"LAN discovery error: {error.Message}"); }
+        finally
+        {
+            _scanGate.Release();
+        }
+    }
+
+    private async Task SendDiscoveryAnnouncement(string kind, CancellationToken cancellationToken)
+    {
+        using var sender = new UdpClient(AddressFamily.InterNetwork);
+        sender.MulticastLoopback = false;
+        var endpoint = new IPEndPoint(IPAddress.Parse(MulticastAddress), DiscoveryPort);
+        var announcement = new DiscoveryAnnouncement(
+            2,
+            _instanceID,
+            _settings().Network.DeviceName,
+            "windows",
+            _settings().Network.CommandPort,
+            kind);
+        var data = JsonSerializer.SerializeToUtf8Bytes(announcement, _json);
+        await sender.SendAsync(data, endpoint, cancellationToken);
     }
 
     private string CreateEnvelope(string type, byte[] payload)
@@ -308,7 +349,7 @@ public sealed class LanPeerService : IDisposable
     }
 
     private sealed record Peer(Guid ID, string DeviceName, IPAddress Address, int CommandPort, DateTimeOffset LastSeen);
-    private sealed record DiscoveryAnnouncement(int Version, Guid InstanceID, string DeviceName, string Platform, int CommandPort);
+    private sealed record DiscoveryAnnouncement(int Version, Guid InstanceID, string DeviceName, string Platform, int CommandPort, string? Kind);
     private sealed record Envelope(int Version, Guid ID, long Timestamp, string Nonce, string Type, string Payload, string Signature);
     private sealed record PreparePayload(Guid TransactionID, WireProfile Profile);
     private sealed record CommitPayload(Guid TransactionID);
@@ -333,9 +374,15 @@ public sealed record WireProfile(
         var actions = new List<WireMonitorAction>();
         foreach (var monitor in monitors)
         {
-            var input = profile.InputAssignments.TryGetValue(monitor.Id, out var inputValue) ? inputValue : (ushort?)null;
-            var mac = profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged);
-            var windows = profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged);
+            var input = profile.InputAssignments.TryGetValue(monitor.ProfileStorageKey, out var inputValue)
+                || profile.InputAssignments.TryGetValue(monitor.Id, out inputValue)
+                ? inputValue : (ushort?)null;
+            var mac = profile.MacDisplayBehaviors.GetValueOrDefault(
+                monitor.ProfileStorageKey,
+                profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged));
+            var windows = profile.WindowsDisplayBehaviors.GetValueOrDefault(
+                monitor.ProfileStorageKey,
+                profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged));
             if (input is null && mac == MacDisplayBehavior.Unchanged && windows == WindowsDisplayBehavior.Unchanged) continue;
             actions.Add(new WireMonitorAction(monitor.NetworkIdentity, input, mac, windows));
         }

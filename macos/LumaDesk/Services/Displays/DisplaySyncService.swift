@@ -398,14 +398,13 @@ final class DisplaySyncService {
         activeRemoteProfile = nil
         applyTopology(profile)
 
-        let displayIDs = profile.inputAssignments.keys.sorted()
         var attemptedSwitch = false
         var successfulSwitch = false
 
-        for id in displayIDs {
+        for id in sessions.keys.sorted() {
             guard !Task.isCancelled else { break }
-            guard let inputValue = profile.inputAssignments[id] else { continue }
             guard var session = sessions[id], session.isConnected, let target = session.target else { continue }
+            guard let inputValue = profileValue(profile.inputAssignments, for: session) else { continue }
 
             attemptedSwitch = true
             session.state = .switching
@@ -478,8 +477,15 @@ final class DisplaySyncService {
         let targets = sessions.values.compactMap { session in
             session.isConnected ? session.target : nil
         }
+        var localProfile = profile
+        localProfile.macDisplayBehaviors = [:]
+        for session in sessions.values {
+            if let behavior = profileValue(profile.macDisplayBehaviors, for: session) {
+                localProfile.macDisplayBehaviors[session.id] = behavior
+            }
+        }
 
-        switch topologyService.apply(profile: profile, connectedTargets: targets) {
+        switch topologyService.apply(profile: localProfile, connectedTargets: targets) {
         case .applied:
             topologyCooldownUntil = Date().addingTimeInterval(0.6)
         case .noMatchingDisplays:
@@ -491,9 +497,9 @@ final class DisplaySyncService {
 
     private func wireProfile(from profile: DisplaySwitchingProfile) -> WireProfile {
         let actions = sessions.values.compactMap { session -> WireMonitorAction? in
-            let input = profile.inputAssignments[session.id]
-            let macBehavior = profile.macDisplayBehaviors[session.id] ?? .unchanged
-            let windowsBehavior = profile.windowsDisplayBehaviors[session.id] ?? .unchanged
+            let input = profileValue(profile.inputAssignments, for: session)
+            let macBehavior = profileValue(profile.macDisplayBehaviors, for: session) ?? .unchanged
+            let windowsBehavior = profileValue(profile.windowsDisplayBehaviors, for: session) ?? .unchanged
             guard input != nil || macBehavior != .unchanged || windowsBehavior != .unchanged else { return nil }
             return WireMonitorAction(
                 sharedID: networkIdentity(for: session),
@@ -541,6 +547,15 @@ final class DisplaySyncService {
     private func networkIdentity(for session: ManagedDisplaySession) -> String {
         let configuration = settings.monitorDDCConfigurations[session.id] ?? .standardDefault
         return configuration.networkIdentity(fallback: session.sharedID)
+    }
+
+    private func profileStorageKey(for session: ManagedDisplaySession) -> String {
+        let configuration = settings.monitorDDCConfigurations[session.id] ?? .standardDefault
+        return configuration.networkIdentity(fallback: session.id)
+    }
+
+    private func profileValue<Value>(_ values: [String: Value], for session: ManagedDisplaySession) -> Value? {
+        values[profileStorageKey(for: session)] ?? values[session.id]
     }
 
     private func publishSnapshots() {

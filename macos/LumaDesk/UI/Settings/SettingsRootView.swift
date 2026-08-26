@@ -176,11 +176,18 @@ struct SettingsRootView: View {
                 }
 
                 LabeledContent("Status") {
-                    Text(appState.lanPeerStatus)
-                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        Text(appState.lanPeerStatus)
+                            .foregroundStyle(.secondary)
+
+                        Button("Rescan") {
+                            appState.rescanLANPeers()
+                        }
+                        .disabled(!appState.preferences.lanPeer.isEnabled)
+                    }
                 }
 
-                Text("Enter the exact same key in the Windows app. Discovery and commands stay on the local network; no separate server is required.")
+                Text("Enter the exact same key in the Windows app. Peers are discovered at launch, on demand, or with Rescan; there is no periodic background broadcast.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -683,6 +690,10 @@ struct SettingsRootView: View {
                         .font(.footnote)
                         .foregroundStyle(.orange)
                 }
+
+                Text("Profile inputs and display behaviors are stored locally on this Mac after Save Display Settings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
@@ -860,11 +871,14 @@ struct SettingsRootView: View {
                             .foregroundStyle(.secondary)
 
                         TextField(
-                            "desk-center",
-                            text: pairingIDBinding(forDisplayID: snapshot.id, configuration: configuration)
+                            "",
+                            text: pairingIDBinding(forDisplayID: snapshot.id, configuration: configuration),
+                            prompt: Text("desk-center")
                         )
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .font(.caption.monospaced())
+                        .multilineTextAlignment(.leading)
                         .help("Use the same Pairing ID for this physical monitor on Mac and Windows.")
 
                         Text("Same value on both devices")
@@ -918,6 +932,7 @@ struct SettingsRootView: View {
             switchingProfileDrafts = appState.preferences.displaySync.switchingProfiles
             defaultSwitchingProfileID = appState.preferences.displaySync.defaultSwitchingProfileID
         }
+        migrateProfileKeys(for: snapshots)
     }
 
     private func monitorDDCDraft(for snapshot: DisplaySyncSnapshot) -> MonitorDDCConfiguration {
@@ -937,9 +952,45 @@ struct SettingsRootView: View {
         Binding(
             get: { monitorDDCDrafts[displayID]?.pairingID ?? configuration.pairingID ?? "" },
             set: { value in
+                let oldKey = profileStorageKey(displayID: displayID, configuration: monitorDDCDrafts[displayID] ?? configuration)
                 updateDDCDraft(forDisplayID: displayID) { $0.pairingID = value }
+                let newConfiguration = monitorDDCDrafts[displayID] ?? configuration
+                let newKey = profileStorageKey(displayID: displayID, configuration: newConfiguration)
+                migrateProfileKey(from: oldKey, to: newKey)
             }
         )
+    }
+
+    private func profileStorageKey(for snapshot: DisplaySyncSnapshot) -> String {
+        profileStorageKey(displayID: snapshot.id, configuration: monitorDDCDraft(for: snapshot))
+    }
+
+    private func profileStorageKey(displayID: String, configuration: MonitorDDCConfiguration) -> String {
+        configuration.networkIdentity(fallback: displayID)
+    }
+
+    private func migrateProfileKeys(for snapshots: [DisplaySyncSnapshot]) {
+        for snapshot in snapshots {
+            migrateProfileKey(from: snapshot.id, to: profileStorageKey(for: snapshot))
+        }
+    }
+
+    private func migrateProfileKey(from oldKey: String, to newKey: String) {
+        guard oldKey.caseInsensitiveCompare(newKey) != .orderedSame else { return }
+        for index in switchingProfileDrafts.indices {
+            if switchingProfileDrafts[index].inputAssignments[newKey] == nil,
+               let value = switchingProfileDrafts[index].inputAssignments.removeValue(forKey: oldKey) {
+                switchingProfileDrafts[index].inputAssignments[newKey] = value
+            }
+            if switchingProfileDrafts[index].macDisplayBehaviors[newKey] == nil,
+               let value = switchingProfileDrafts[index].macDisplayBehaviors.removeValue(forKey: oldKey) {
+                switchingProfileDrafts[index].macDisplayBehaviors[newKey] = value
+            }
+            if switchingProfileDrafts[index].windowsDisplayBehaviors[newKey] == nil,
+               let value = switchingProfileDrafts[index].windowsDisplayBehaviors.removeValue(forKey: oldKey) {
+                switchingProfileDrafts[index].windowsDisplayBehaviors[newKey] = value
+            }
+        }
     }
 
     private func switchingProfileRow(_ index: Int) -> some View {
@@ -1030,9 +1081,10 @@ struct SettingsRootView: View {
             .padding(.leading, 25)
 
             ForEach(appState.displaySyncSnapshots) { snapshot in
+                let profileKey = profileStorageKey(for: snapshot)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(alignment: .center, spacing: 7) {
-                        Toggle("", isOn: profileAssignmentEnabledBinding(profileIndex: index, displayID: snapshot.id))
+                        Toggle("", isOn: profileAssignmentEnabledBinding(profileIndex: index, displayID: profileKey))
                             .labelsHidden()
                             .toggleStyle(.checkbox)
 
@@ -1050,11 +1102,11 @@ struct SettingsRootView: View {
 
                         labeledHexField(
                             "Input",
-                            value: profileInputBinding(profileIndex: index, displayID: snapshot.id),
+                            value: profileInputBinding(profileIndex: index, displayID: profileKey),
                             width: 58
                         )
-                        .disabled(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil)
-                        .opacity(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil ? 0.45 : 1)
+                        .disabled(switchingProfileDrafts[index].inputAssignments[profileKey] == nil)
+                        .opacity(switchingProfileDrafts[index].inputAssignments[profileKey] == nil ? 0.45 : 1)
                     }
 
                     HStack(alignment: .center, spacing: 12) {
@@ -1064,7 +1116,7 @@ struct SettingsRootView: View {
 
                         Spacer(minLength: 8)
 
-                        Picker("This Mac", selection: macBehaviorBinding(profileIndex: index, displayID: snapshot.id)) {
+                        Picker("This Mac", selection: macBehaviorBinding(profileIndex: index, displayID: profileKey)) {
                             ForEach(MacDisplayBehavior.allCases) { behavior in
                                 Text(behavior.title).tag(behavior)
                             }
@@ -1074,7 +1126,7 @@ struct SettingsRootView: View {
                         .frame(width: 150)
 
                         if switchingProfileDrafts[index].coordinationMode == .managed {
-                            Picker("Windows", selection: windowsBehaviorBinding(profileIndex: index, displayID: snapshot.id)) {
+                            Picker("Windows", selection: windowsBehaviorBinding(profileIndex: index, displayID: profileKey)) {
                                 ForEach(WindowsDisplayBehavior.allCases) { behavior in
                                     Text(behavior.title).tag(behavior)
                                 }

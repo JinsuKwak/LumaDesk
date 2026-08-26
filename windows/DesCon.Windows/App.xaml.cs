@@ -47,7 +47,7 @@ public partial class App : Application
         _peer.ProfileCommitted = profile => _executor.ApplyRemoteProfileAsync(profile);
         _peer.Start();
 
-        _viewModel = new SettingsViewModel(_settings, _store, ApplySavedSettings);
+        _viewModel = new SettingsViewModel(_settings, _store, ApplySavedSettings, () => _peer?.Rescan());
         _viewModel.Status = _peer.PeerStatus;
         _settingsWindow = new MainWindow(_viewModel);
         _tray = new TrayIconService(ShowSettings, Quit, profileID => _executor.ExecuteAsync(profileID));

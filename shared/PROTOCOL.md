@@ -21,13 +21,17 @@ Managed profile activation is a two-phase transaction:
 Monitor actions use a per-monitor network identity. A user-defined Pairing ID
 is normalized case-insensitively and sent as `PAIR:<id>`; when it is empty, the
 clients fall back to the monitor's EDID-derived shared identity. Display numbers
-are local UI labels and are never used for cross-device matching.
+are local UI labels and are never used for cross-device matching. Local profile
+assignments also prefer this Pairing ID so input and topology behaviors survive
+display-number and OS-local identifier changes.
 
 External profiles deliberately skip the peer phases. They apply the initiating
 host's safe pre-switch topology, send DDC, then report `sent-unverified`.
 
-Messages are newline-delimited UTF-8 JSON over TCP. Discovery uses a LAN multicast
-announcement; commands are never broadcast. Production messages carry an HMAC
+Messages are newline-delimited UTF-8 JSON over TCP. Discovery uses a short LAN
+multicast probe at launch, on demand, or after the user requests Rescan. A peer
+answers once and the endpoint is cached for direct commands; there is no periodic
+background announcement. Commands are never broadcast. Production messages carry an HMAC
 SHA-256 signature over `version|id|timestamp|nonce|type|payload` and peers reject
 timestamps outside 30 seconds or repeated nonces.
 

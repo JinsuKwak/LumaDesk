@@ -34,7 +34,10 @@ public sealed class ProfileExecutor
             }
 
             StatusChanged?.Invoke($"Switching to {profile.Name}…");
-            var monitors = settings.Monitors.ToDictionary(item => item.Id, StringComparer.OrdinalIgnoreCase);
+            var monitors = settings.Monitors
+                .SelectMany(item => new[] { (Key: item.Id, Monitor: item), (Key: item.ProfileStorageKey, Monitor: item) })
+                .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(item => item.Key, item => item.First().Monitor, StringComparer.OrdinalIgnoreCase);
             var errors = new List<string>();
             Guid? transactionID = null;
 

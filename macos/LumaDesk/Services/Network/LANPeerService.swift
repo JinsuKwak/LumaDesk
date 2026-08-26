@@ -29,7 +29,7 @@ final class LANPeerService {
     private var settings = LANPeerSettings()
     private var listener: NWListener?
     private var multicastGroup: NWConnectionGroup?
-    private var announcementTask: Task<Void, Never>?
+    private var discoveryTask: Task<Void, Never>?
     private var peers: [UUID: Peer] = [:]
     private var pendingProfiles: [UUID: WireProfile] = [:]
     private var seenNonces: [String: Date] = [:]
@@ -58,12 +58,18 @@ final class LANPeerService {
     func prepare(profile: WireProfile) async -> (ready: Bool, transactionID: UUID?, detail: String) {
         guard settings.isEnabled else { return (false, nil, "LAN peer communication is disabled.") }
         guard settings.sharedKey.count >= 8 else { return (false, nil, "Set the same LAN pairing key on both computers.") }
-        guard let peer = bestPeer() else { return (false, nil, "Mac could not find the Windows peer on this LAN.") }
+        guard let peer = await peerOrDiscover() else { return (false, nil, "Mac could not find the Windows peer on this LAN.") }
 
         let transactionID = UUID()
         let payload = PreparePayload(transactionID: transactionID, profile: profile)
         guard let data = try? encoder.encode(payload) else { return (false, nil, "Could not encode profile.") }
-        let response = await send(type: "prepare", payload: data, to: peer)
+        var response = await send(type: "prepare", payload: data, to: peer)
+        if !response.ok {
+            peers.removeValue(forKey: peer.id)
+            if let rediscoveredPeer = await peerOrDiscover() {
+                response = await send(type: "prepare", payload: data, to: rediscoveredPeer)
+            }
+        }
         return response.ok ? (true, transactionID, response.detail) : (false, nil, response.detail)
     }
 
@@ -76,9 +82,30 @@ final class LANPeerService {
         return (response.ok, response.detail)
     }
 
+    func rescan() {
+        guard settings.isEnabled, multicastGroup != nil else {
+            statusHandler?(settings.isEnabled ? "LAN discovery unavailable" : "LAN peer off")
+            return
+        }
+
+        discoveryTask?.cancel()
+        peers.removeAll()
+        statusHandler?("Searching LAN")
+        discoveryTask = Task { [weak self] in
+            guard let self else { return }
+            for _ in 0 ..< 3 where !Task.isCancelled {
+                self.sendAnnouncement(kind: "probe")
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled, self.peers.isEmpty else { return }
+            self.statusHandler?("No Windows peer found")
+        }
+    }
+
     func stop() {
-        announcementTask?.cancel()
-        announcementTask = nil
+        discoveryTask?.cancel()
+        discoveryTask = nil
         listener?.cancel()
         listener = nil
         multicastGroup?.cancel()
@@ -182,26 +209,11 @@ final class LANPeerService {
                 self?.handleAnnouncement(content, host: host)
             }
         }
-        group.stateUpdateHandler = { _ in }
-        group.start(queue: queue)
-
-        announcementTask = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                if let data = try? self.encoder.encode(
-                    DiscoveryAnnouncement(
-                        version: 1,
-                        instanceID: self.instanceID,
-                        deviceName: self.settings.deviceName,
-                        platform: "macOS",
-                        commandPort: Int(self.settings.commandPort)
-                    )
-                ) {
-                    self.multicastGroup?.send(content: data) { _ in }
-                }
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
-            }
+        group.stateUpdateHandler = { [weak self] state in
+            guard case .ready = state else { return }
+            Task { @MainActor [weak self] in self?.rescan() }
         }
+        group.start(queue: queue)
     }
 
     private func handleAnnouncement(_ data: Data, host: NWEndpoint.Host) {
@@ -219,12 +231,34 @@ final class LANPeerService {
             lastSeen: Date()
         )
         statusHandler?("Connected to \(announcement.deviceName)")
+        if announcement.kind == "probe" {
+            sendAnnouncement(kind: "presence")
+        }
     }
 
     private func bestPeer() -> Peer? {
-        let cutoff = Date().addingTimeInterval(-12)
-        peers = peers.filter { $0.value.lastSeen >= cutoff }
         return peers.values.max(by: { $0.lastSeen < $1.lastSeen })
+    }
+
+    private func peerOrDiscover() async -> Peer? {
+        if let peer = bestPeer() { return peer }
+        rescan()
+        try? await Task.sleep(nanoseconds: 1_100_000_000)
+        return bestPeer()
+    }
+
+    private func sendAnnouncement(kind: String) {
+        guard let data = try? encoder.encode(
+            DiscoveryAnnouncement(
+                version: 2,
+                instanceID: instanceID,
+                deviceName: settings.deviceName,
+                platform: "macOS",
+                commandPort: Int(settings.commandPort),
+                kind: kind
+            )
+        ) else { return }
+        multicastGroup?.send(content: data) { _ in }
     }
 
     private func send(type: String, payload: Data, to peer: Peer) async -> PeerResponse {
@@ -351,6 +385,7 @@ private struct DiscoveryAnnouncement: Codable {
     var deviceName: String
     var platform: String
     var commandPort: Int
+    var kind: String?
 }
 
 private struct Envelope: Codable {

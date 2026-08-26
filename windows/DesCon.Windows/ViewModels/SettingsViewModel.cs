@@ -83,17 +83,22 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
     private WindowsDisplayBehavior _behavior;
     private bool _showMacBehavior;
 
-    public string MonitorID { get; }
+    public string MonitorID => _monitor.Id;
+    private string StorageKey => _monitor.ProfileStorageKey;
     private readonly MonitorDefinition _monitor;
 
     public ProfileMonitorRowViewModel(MonitorDefinition monitor, SwitchingProfile profile)
     {
         _monitor = monitor;
-        MonitorID = monitor.Id;
-        _isIncluded = profile.InputAssignments.TryGetValue(monitor.Id, out var value);
+        _isIncluded = profile.InputAssignments.TryGetValue(StorageKey, out var value)
+            || profile.InputAssignments.TryGetValue(monitor.Id, out value);
         _input = (_isIncluded ? value : (ushort)0).ToString("X4");
-        _macBehavior = profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged);
-        _behavior = profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged);
+        _macBehavior = profile.MacDisplayBehaviors.GetValueOrDefault(
+            StorageKey,
+            profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged));
+        _behavior = profile.WindowsDisplayBehaviors.GetValueOrDefault(
+            StorageKey,
+            profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged));
         _showMacBehavior = profile.CoordinationMode == ProfileCoordinationMode.Managed;
     }
 
@@ -118,17 +123,23 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
                 error = $"{Label}: Input must be a four-digit hexadecimal value.";
                 return false;
             }
-            profile.InputAssignments[MonitorID] = input;
+            profile.InputAssignments[StorageKey] = input;
         }
         else
         {
-            profile.InputAssignments.Remove(MonitorID);
+            profile.InputAssignments.Remove(StorageKey);
         }
+        if (!string.Equals(StorageKey, MonitorID, StringComparison.OrdinalIgnoreCase)) profile.InputAssignments.Remove(MonitorID);
 
-        if (MacBehavior == MacDisplayBehavior.Unchanged) profile.MacDisplayBehaviors.Remove(MonitorID);
-        else profile.MacDisplayBehaviors[MonitorID] = MacBehavior;
-        if (Behavior == WindowsDisplayBehavior.Unchanged) profile.WindowsDisplayBehaviors.Remove(MonitorID);
-        else profile.WindowsDisplayBehaviors[MonitorID] = Behavior;
+        if (MacBehavior == MacDisplayBehavior.Unchanged) profile.MacDisplayBehaviors.Remove(StorageKey);
+        else profile.MacDisplayBehaviors[StorageKey] = MacBehavior;
+        if (Behavior == WindowsDisplayBehavior.Unchanged) profile.WindowsDisplayBehaviors.Remove(StorageKey);
+        else profile.WindowsDisplayBehaviors[StorageKey] = Behavior;
+        if (!string.Equals(StorageKey, MonitorID, StringComparison.OrdinalIgnoreCase))
+        {
+            profile.MacDisplayBehaviors.Remove(MonitorID);
+            profile.WindowsDisplayBehaviors.Remove(MonitorID);
+        }
         return true;
     }
 }
@@ -206,6 +217,7 @@ public sealed class SettingsViewModel : ObservableModel
     private readonly AppSettings _settings;
     private readonly SettingsStore _store;
     private readonly Action _afterSave;
+    private readonly Action _rescanPeers;
     private AppTheme _theme;
     private bool _launchAtLogin;
     private bool _networkEnabled;
@@ -213,11 +225,12 @@ public sealed class SettingsViewModel : ObservableModel
     private string _sharedKey;
     private string _status = "Ready";
 
-    public SettingsViewModel(AppSettings settings, SettingsStore store, Action afterSave)
+    public SettingsViewModel(AppSettings settings, SettingsStore store, Action afterSave, Action rescanPeers)
     {
         _settings = settings;
         _store = store;
         _afterSave = afterSave;
+        _rescanPeers = rescanPeers;
         _theme = settings.Theme;
         _launchAtLogin = settings.LaunchAtLogin;
         _networkEnabled = settings.Network.Enabled;
@@ -236,6 +249,17 @@ public sealed class SettingsViewModel : ObservableModel
     public string Status { get => _status; set => Set(ref _status, value); }
     public ObservableCollection<MonitorEditorViewModel> Monitors { get; }
     public ObservableCollection<ProfileEditorViewModel> Profiles { get; }
+
+    public void RescanPeers()
+    {
+        if (!NetworkEnabled)
+        {
+            Status = "Enable LAN peer before rescanning.";
+            return;
+        }
+        Status = "Searching LAN";
+        _rescanPeers();
+    }
 
     public void AddProfile()
     {

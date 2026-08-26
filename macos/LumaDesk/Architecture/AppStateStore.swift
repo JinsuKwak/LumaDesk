@@ -181,6 +181,10 @@ final class AppStateStore: ObservableObject {
         setLANSharedKey(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
     }
 
+    func rescanLANPeers() {
+        lanPeerService.rescan()
+    }
+
     func refreshPermissions() {
         permissionService.refresh()
         permissionState = permissionService.state
