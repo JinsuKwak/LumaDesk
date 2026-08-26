@@ -34,9 +34,10 @@ public sealed class TrayIconService : IDisposable
         var favorite = settings.Profiles.FirstOrDefault(profile => profile.Id == settings.FavoriteProfileId);
         var primary = new ToolStripMenuItem(favorite is null ? "Choose a favorite profile" : $"Switch to {favorite.Name}")
         {
-            Enabled = favorite is not null,
-            Font = new Font(SystemFonts.MenuFont, FontStyle.Bold)
+            Enabled = favorite is not null
         };
+        if (SystemFonts.MenuFont is { } menuFont)
+            primary.Font = new Font(menuFont, FontStyle.Bold);
         if (favorite is not null) primary.Click += async (_, _) => await _activate(favorite.Id);
         menu.Items.Add(primary);
 
