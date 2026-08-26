@@ -177,10 +177,6 @@ final class AppStateStore: ObservableObject {
         lanPeerService.configure(preferences.lanPeer)
     }
 
-    func generateLANSharedKey() {
-        setLANSharedKey(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
-    }
-
     func rescanLANPeers() {
         lanPeerService.rescan()
     }

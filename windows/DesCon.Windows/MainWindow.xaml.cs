@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private void SaveClicked(object sender, RoutedEventArgs e) => _viewModel.Save();
     private void AddProfileClicked(object sender, RoutedEventArgs e) => _viewModel.AddProfile();
     private void RescanPeerClicked(object sender, RoutedEventArgs e) => _viewModel.RescanPeers();
+    private void SavePeerKeyClicked(object sender, RoutedEventArgs e) => _viewModel.SavePeerKey();
 
     private void LockMonitorClicked(object sender, RoutedEventArgs e)
     {

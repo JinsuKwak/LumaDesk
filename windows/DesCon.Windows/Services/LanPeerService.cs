@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -228,7 +229,18 @@ public sealed class LanPeerService : IDisposable
             _discoveryReceiver = new UdpClient(AddressFamily.InterNetwork);
             _discoveryReceiver.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             _discoveryReceiver.Client.Bind(new IPEndPoint(IPAddress.Any, DiscoveryPort));
-            _discoveryReceiver.JoinMulticastGroup(IPAddress.Parse(MulticastAddress));
+            var multicastAddress = IPAddress.Parse(MulticastAddress);
+            var joinedInterface = false;
+            foreach (var localAddress in ActiveMulticastIPv4Addresses())
+            {
+                try
+                {
+                    _discoveryReceiver.JoinMulticastGroup(multicastAddress, localAddress);
+                    joinedInterface = true;
+                }
+                catch (SocketException) { }
+            }
+            if (!joinedInterface) _discoveryReceiver.JoinMulticastGroup(multicastAddress);
             _ = ScanForPeers(cancellationToken, clearExisting: true);
 
             while (!cancellationToken.IsCancellationRequested)
@@ -297,8 +309,6 @@ public sealed class LanPeerService : IDisposable
 
     private async Task SendDiscoveryAnnouncement(string kind, CancellationToken cancellationToken)
     {
-        using var sender = new UdpClient(AddressFamily.InterNetwork);
-        sender.MulticastLoopback = false;
         var endpoint = new IPEndPoint(IPAddress.Parse(MulticastAddress), DiscoveryPort);
         var announcement = new DiscoveryAnnouncement(
             2,
@@ -308,7 +318,43 @@ public sealed class LanPeerService : IDisposable
             _settings().Network.CommandPort,
             kind);
         var data = JsonSerializer.SerializeToUtf8Bytes(announcement, _json);
-        await sender.SendAsync(data, endpoint, cancellationToken);
+        var sent = false;
+        foreach (var localAddress in ActiveMulticastIPv4Addresses())
+        {
+            try
+            {
+                using var sender = new UdpClient(new IPEndPoint(localAddress, 0));
+                sender.MulticastLoopback = false;
+                sender.Client.SetSocketOption(
+                    SocketOptionLevel.IP,
+                    SocketOptionName.MulticastInterface,
+                    localAddress.GetAddressBytes());
+                await sender.SendAsync(data, endpoint, cancellationToken);
+                sent = true;
+            }
+            catch (SocketException) { }
+        }
+
+        if (sent) return;
+        using var fallbackSender = new UdpClient(AddressFamily.InterNetwork);
+        fallbackSender.MulticastLoopback = false;
+        await fallbackSender.SendAsync(data, endpoint, cancellationToken);
+    }
+
+    private static IReadOnlyList<IPAddress> ActiveMulticastIPv4Addresses()
+    {
+        return NetworkInterface.GetAllNetworkInterfaces()
+            .Where(adapter => adapter.OperationalStatus == OperationalStatus.Up
+                && adapter.SupportsMulticast
+                && adapter.NetworkInterfaceType is not NetworkInterfaceType.Loopback
+                && adapter.NetworkInterfaceType is not NetworkInterfaceType.Tunnel)
+            .SelectMany(adapter => adapter.GetIPProperties().UnicastAddresses)
+            .Select(address => address.Address)
+            .Where(address => address.AddressFamily == AddressFamily.InterNetwork
+                && !IPAddress.IsLoopback(address)
+                && !address.ToString().StartsWith("169.254.", StringComparison.Ordinal))
+            .Distinct()
+            .ToList();
     }
 
     private string CreateEnvelope(string type, byte[] payload)

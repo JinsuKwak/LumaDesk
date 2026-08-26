@@ -35,6 +35,7 @@ struct SettingsRootView: View {
     @State private var switchingProfileDrafts: [DisplaySwitchingProfile] = []
     @State private var defaultSwitchingProfileID: UUID?
     @State private var unlockedDDCDisplays = Set<String>()
+    @State private var lanSharedKeyDraft = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -50,6 +51,7 @@ struct SettingsRootView: View {
         .preferredColorScheme(appState.preferences.general.theme.colorScheme)
         .onAppear {
             appState.refreshPermissions()
+            lanSharedKeyDraft = appState.preferences.lanPeer.sharedKey
             loadDisplaySwitchDrafts(appState.displaySyncSnapshots)
         }
         .onChange(of: appState.displaySyncSnapshots) { _, snapshots in
@@ -158,19 +160,33 @@ struct SettingsRootView: View {
                 }
 
                 LabeledContent("Pairing key") {
-                    HStack(spacing: 8) {
-                        TextField(
-                            "At least 8 characters",
-                            text: Binding(
-                                get: { appState.preferences.lanPeer.sharedKey },
-                                set: appState.setLANSharedKey
+                    VStack(alignment: .trailing, spacing: 4) {
+                        HStack(spacing: 8) {
+                            TextField(
+                                "",
+                                text: $lanSharedKeyDraft,
+                                prompt: Text("Pairing key")
                             )
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 230)
+                            .labelsHidden()
+                            .textFieldStyle(.roundedBorder)
+                            .foregroundStyle(isLANSharedKeyDraftValid ? Color.primary : Color.red)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .stroke(isLANSharedKeyDraftValid ? Color.clear : Color.red, lineWidth: 1)
+                            }
+                            .frame(width: 230)
 
-                        Button("Generate") {
-                            appState.generateLANSharedKey()
+                            Button("Save") {
+                                lanSharedKeyDraft = lanSharedKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                appState.setLANSharedKey(lanSharedKeyDraft)
+                            }
+                            .disabled(!isLANSharedKeyDraftValid || lanSharedKeyDraft == appState.preferences.lanPeer.sharedKey)
+                        }
+
+                        if !isLANSharedKeyDraftValid {
+                            Text("Use 8 or more characters")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
                         }
                     }
                 }
@@ -845,7 +861,7 @@ struct SettingsRootView: View {
                 }
 
                 HStack(alignment: .center, spacing: 8) {
-                    Text("Display \(snapshot.displayNumber) · \(displaySyncDetailText(snapshot))")
+                    Text("\(displayLabel(for: snapshot)) · \(displaySyncDetailText(snapshot))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -910,10 +926,21 @@ struct SettingsRootView: View {
         return "Current input unavailable"
     }
 
+    private func displayLabel(for snapshot: DisplaySyncSnapshot) -> String {
+        let pairingID = appState.preferences.displaySync.monitorDDCConfigurations[snapshot.id]?
+            .pairingID?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return pairingID.isEmpty ? "Display \(snapshot.displayNumber)" : pairingID
+    }
+
     private var hasUnsavedDisplaySwitchChanges: Bool {
         monitorDDCDrafts != appState.preferences.displaySync.monitorDDCConfigurations
             || switchingProfileDrafts != appState.preferences.displaySync.switchingProfiles
             || defaultSwitchingProfileID != appState.preferences.displaySync.defaultSwitchingProfileID
+    }
+
+    private var isLANSharedKeyDraftValid: Bool {
+        lanSharedKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).count >= 8
     }
 
     private var arePairingIDsValid: Bool {
@@ -1088,7 +1115,7 @@ struct SettingsRootView: View {
                             .labelsHidden()
                             .toggleStyle(.checkbox)
 
-                        Text("Display \(snapshot.displayNumber) ·")
+                        Text("\(displayLabel(for: snapshot)) ·")
                             .font(.caption)
                             .fixedSize(horizontal: true, vertical: false)
 

@@ -29,6 +29,10 @@ public sealed class MonitorDefinition
     public string ProfileStorageKey => string.IsNullOrWhiteSpace(PairingId)
         ? Id
         : $"PAIR:{PairingId.Trim().ToLowerInvariant()}";
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayLabel => string.IsNullOrWhiteSpace(PairingId)
+        ? $"Display {DisplayNumber}"
+        : PairingId.Trim();
     public string Name { get; set; } = "External display";
     public int DisplayNumber { get; set; }
     public string GdiDeviceName { get; set; } = "";

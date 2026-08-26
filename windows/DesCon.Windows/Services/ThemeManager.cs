@@ -12,13 +12,18 @@ public static class ThemeManager
     public static void Apply(AppTheme theme)
     {
         var isLight = theme == AppTheme.Light || (theme == AppTheme.System && SystemUsesLightTheme());
-        SetBrush("WindowBrush", isLight ? "#EAF4F5F8" : "#EE15171B");
-        SetBrush("SurfaceBrush", isLight ? "#BFFFFFFF" : "#991F2228");
-        SetBrush("SurfaceHoverBrush", isLight ? "#E6FFFFFF" : "#CC292D34");
-        SetBrush("BorderBrush", isLight ? "#26000000" : "#35FFFFFF");
+        SetBrush("WindowBrush", isLight ? "#F2F3F5F8" : "#F217191E");
+        SetBrush("SidebarBrush", isLight ? "#DDF9FAFC" : "#B51D2026");
+        SetBrush("SurfaceBrush", isLight ? "#D9FFFFFF" : "#A724272E");
+        SetBrush("SurfaceRaisedBrush", isLight ? "#F2FFFFFF" : "#D22A2E36");
+        SetBrush("SurfaceHoverBrush", isLight ? "#FFE8EBF0" : "#E1323740");
+        SetBrush("InputBrush", isLight ? "#E8FFFFFF" : "#B51A1D22");
+        SetBrush("BorderBrush", isLight ? "#24000000" : "#2FFFFFFF");
+        SetBrush("DividerBrush", isLight ? "#16000000" : "#1FFFFFFF");
         SetBrush("PrimaryTextBrush", isLight ? "#FF17191D" : "#FFF4F5F7");
         SetBrush("SecondaryTextBrush", isLight ? "#FF60656E" : "#FFA5AAB3");
         SetBrush("AccentBrush", isLight ? "#FF1674D1" : "#FF4C9DFF");
+        SetBrush("AccentSoftBrush", isLight ? "#211674D1" : "#294C9DFF");
         SetBrush("SuccessBrush", isLight ? "#FF168A4B" : "#FF34D17B");
         SetBrush("DangerBrush", isLight ? "#FFCA3434" : "#FFFF6B6B");
     }

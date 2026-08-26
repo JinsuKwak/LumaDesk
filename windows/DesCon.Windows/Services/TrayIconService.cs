@@ -19,7 +19,7 @@ public sealed class TrayIconService : IDisposable
         _icon = new NotifyIcon
         {
             Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath ?? "") ?? SystemIcons.Application,
-            Text = "DesCon",
+            Text = "LumaDesk",
             Visible = true
         };
         _icon.MouseClick += (_, eventArgs) =>

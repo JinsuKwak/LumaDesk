@@ -36,7 +36,7 @@ public sealed class MonitorEditorViewModel : ObservableModel
     }
 
     public string Name => Model.Name;
-    public string Detail => $"Display {Model.DisplayNumber} · {(Model.IsConnected ? "Connected" : "Offline")}";
+    public string Detail => $"{Model.DisplayLabel} · {(Model.IsConnected ? "Connected" : "Offline")}";
     public string Source { get => _source; set => Set(ref _source, value.ToUpperInvariant()); }
     public string Vcp { get => _vcp; set => Set(ref _vcp, value.ToUpperInvariant()); }
     public string PairingId { get => _pairingId; set => Set(ref _pairingId, value); }
@@ -103,7 +103,7 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
     }
 
     public bool IsIncluded { get => _isIncluded; set => Set(ref _isIncluded, value); }
-    public string Label => $"Display {_monitor.DisplayNumber} · {_monitor.Name}";
+    public string Label => $"{_monitor.DisplayLabel} · {_monitor.Name}";
     public string Input { get => _input; set => Set(ref _input, value.ToUpperInvariant()); }
     public MacDisplayBehavior MacBehavior { get => _macBehavior; set => Set(ref _macBehavior, value); }
     public WindowsDisplayBehavior Behavior { get => _behavior; set => Set(ref _behavior, value); }
@@ -201,6 +201,11 @@ public sealed class ProfileEditorViewModel : ObservableModel
         else existing.Refresh();
     }
 
+    public void RefreshMonitorLabels()
+    {
+        foreach (var monitor in Monitors) monitor.Refresh();
+    }
+
     public bool Apply(out string error)
     {
         error = "";
@@ -245,7 +250,18 @@ public sealed class SettingsViewModel : ObservableModel
     public bool LaunchAtLogin { get => _launchAtLogin; set => Set(ref _launchAtLogin, value); }
     public bool NetworkEnabled { get => _networkEnabled; set => Set(ref _networkEnabled, value); }
     public string DeviceName { get => _deviceName; set => Set(ref _deviceName, value); }
-    public string SharedKey { get => _sharedKey; set => Set(ref _sharedKey, value); }
+    public string SharedKey
+    {
+        get => _sharedKey;
+        set
+        {
+            if (!Set(ref _sharedKey, value)) return;
+            Changed(nameof(IsSharedKeyValid));
+            Changed(nameof(IsSharedKeyDirty));
+        }
+    }
+    public bool IsSharedKeyValid => SharedKey.Trim().Length >= 8;
+    public bool IsSharedKeyDirty => !string.Equals(SharedKey.Trim(), _settings.Network.SharedKey, StringComparison.Ordinal);
     public string Status { get => _status; set => Set(ref _status, value); }
     public ObservableCollection<MonitorEditorViewModel> Monitors { get; }
     public ObservableCollection<ProfileEditorViewModel> Profiles { get; }
@@ -259,6 +275,20 @@ public sealed class SettingsViewModel : ObservableModel
         }
         Status = "Searching LAN";
         _rescanPeers();
+    }
+
+    public void SavePeerKey()
+    {
+        if (!IsSharedKeyValid)
+        {
+            Status = "Pairing key must contain at least 8 characters.";
+            return;
+        }
+        ApplyNetworkDrafts();
+        _store.Save(_settings);
+        _afterSave();
+        Changed(nameof(IsSharedKeyDirty));
+        Status = "Pairing key saved";
     }
 
     public void AddProfile()
@@ -306,6 +336,12 @@ public sealed class SettingsViewModel : ObservableModel
             return false;
         }
 
+        if (NetworkEnabled && !IsSharedKeyValid)
+        {
+            Status = "Pairing key must contain at least 8 characters.";
+            return false;
+        }
+
         var pairingIDs = Monitors
             .Select(item => item.PairingId.Trim())
             .Where(item => !string.IsNullOrWhiteSpace(item))
@@ -332,13 +368,21 @@ public sealed class SettingsViewModel : ObservableModel
 
         _settings.Theme = Theme;
         _settings.LaunchAtLogin = LaunchAtLogin;
-        _settings.Network.Enabled = NetworkEnabled;
-        _settings.Network.DeviceName = string.IsNullOrWhiteSpace(DeviceName) ? Environment.MachineName : DeviceName.Trim();
-        _settings.Network.SharedKey = SharedKey.Trim();
+        ApplyNetworkDrafts();
         _settings.FavoriteProfileId = Profiles.FirstOrDefault(item => item.IsFavorite)?.Id;
         _store.Save(_settings);
         _afterSave();
+        foreach (var monitor in Monitors) monitor.Refresh();
+        foreach (var profile in Profiles) profile.RefreshMonitorLabels();
+        Changed(nameof(IsSharedKeyDirty));
         Status = "Saved";
         return true;
+    }
+
+    private void ApplyNetworkDrafts()
+    {
+        _settings.Network.Enabled = NetworkEnabled;
+        _settings.Network.DeviceName = string.IsNullOrWhiteSpace(DeviceName) ? Environment.MachineName : DeviceName.Trim();
+        _settings.Network.SharedKey = SharedKey.Trim();
     }
 }
