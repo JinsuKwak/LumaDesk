@@ -38,6 +38,12 @@ public sealed class ProfileExecutor
                 .SelectMany(item => new[] { (Key: item.Id, Monitor: item), (Key: item.ProfileStorageKey, Monitor: item) })
                 .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(item => item.Key, item => item.First().Monitor, StringComparer.OrdinalIgnoreCase);
+            var windowsActions = profile.WindowsDisplayBehaviors
+                .Where(item => monitors.ContainsKey(item.Key))
+                .Select(item => (Monitor: monitors[item.Key], Behavior: item.Value))
+                .GroupBy(item => item.Monitor.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
             var errors = new List<string>();
             Guid? transactionID = null;
 
@@ -52,13 +58,10 @@ public sealed class ProfileExecutor
                 transactionID = preparation.TransactionID;
             }
 
-            // A safe replacement primary must be established before a DDC input
-            // switch can remove the current desktop from Windows.
-            foreach (var (monitorID, behavior) in profile.WindowsDisplayBehaviors)
-            {
-                if (behavior != WindowsDisplayBehavior.Primary || !monitors.TryGetValue(monitorID, out var monitor)) continue;
-                if (!_topology.MakePrimary(monitor, out var error)) errors.Add(error);
-            }
+            // Displays returning to Windows must be active before their monitor
+            // input is switched back. A replacement primary must also be ready
+            // before any other Windows path is detached.
+            ApplyActiveBehaviors(windowsActions, errors);
 
             var delivered = 0;
             foreach (var (monitorID, value) in profile.InputAssignments)
@@ -77,22 +80,10 @@ public sealed class ProfileExecutor
                 if (!commit.Ok) errors.Add(commit.Detail);
             }
 
-            foreach (var (monitorID, behavior) in profile.WindowsDisplayBehaviors)
-            {
-                if (!monitors.TryGetValue(monitorID, out var monitor)) continue;
-                switch (behavior)
-                {
-                    case WindowsDisplayBehavior.Disabled:
-                        if (!_topology.Disable(monitor, out var disableError)) errors.Add(disableError);
-                        break;
-                    case WindowsDisplayBehavior.Extended:
-                        if (!_topology.EnableExtended(monitor, out var enableError)) errors.Add(enableError);
-                        break;
-                    case WindowsDisplayBehavior.MirrorPrimary:
-                        if (!_topology.MirrorAll(out var mirrorError)) errors.Add(mirrorError);
-                        break;
-                }
-            }
+            // Keep the Windows path available long enough for DDC to work, then
+            // detach displays handed to another computer and verify that the
+            // desktop space really disappeared.
+            await ApplyDisabledBehaviorsAsync(windowsActions, errors);
 
             if (errors.Count > 0)
                 StatusChanged?.Invoke($"{profile.Name}: {string.Join(" · ", errors.Distinct())}");
@@ -119,26 +110,15 @@ public sealed class ProfileExecutor
                 .GroupBy(item => item.NetworkIdentity, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(item => item.Key, item => item.First(), StringComparer.OrdinalIgnoreCase);
             var errors = new List<string>();
+            var windowsActions = wireProfile.Monitors
+                .Where(item => monitors.ContainsKey(item.SharedID))
+                .Select(item => (Monitor: monitors[item.SharedID], Behavior: item.WindowsBehavior))
+                .GroupBy(item => item.Monitor.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .ToList();
 
-            foreach (var action in wireProfile.Monitors.Where(item => item.WindowsBehavior == WindowsDisplayBehavior.Primary))
-                if (monitors.TryGetValue(action.SharedID, out var primary) && !_topology.MakePrimary(primary, out var error)) errors.Add(error);
-
-            foreach (var action in wireProfile.Monitors)
-            {
-                if (!monitors.TryGetValue(action.SharedID, out var monitor)) continue;
-                switch (action.WindowsBehavior)
-                {
-                    case WindowsDisplayBehavior.Disabled:
-                        if (!_topology.Disable(monitor, out var disableError)) errors.Add(disableError);
-                        break;
-                    case WindowsDisplayBehavior.Extended:
-                        if (!_topology.EnableExtended(monitor, out var enableError)) errors.Add(enableError);
-                        break;
-                    case WindowsDisplayBehavior.MirrorPrimary:
-                        if (!_topology.MirrorAll(out var mirrorError)) errors.Add(mirrorError);
-                        break;
-                }
-            }
+            ApplyActiveBehaviors(windowsActions, errors);
+            await ApplyDisabledBehaviorsAsync(windowsActions, errors);
 
             StatusChanged?.Invoke(errors.Count == 0
                 ? $"{wireProfile.Name} applied"
@@ -148,5 +128,67 @@ public sealed class ProfileExecutor
         {
             _gate.Release();
         }
+    }
+
+    private void ApplyActiveBehaviors(
+        IReadOnlyCollection<(MonitorDefinition Monitor, WindowsDisplayBehavior Behavior)> actions,
+        ICollection<string> errors)
+    {
+        foreach (var action in actions.Where(item => item.Behavior == WindowsDisplayBehavior.Extended))
+        {
+            if (!_topology.EnableExtended(action.Monitor, out var error))
+                errors.Add($"{action.Monitor.DisplayLabel}: {error}");
+        }
+
+        foreach (var action in actions.Where(item => item.Behavior == WindowsDisplayBehavior.Primary))
+        {
+            if (!_topology.MakePrimary(action.Monitor, out var error))
+                errors.Add($"{action.Monitor.DisplayLabel}: {error}");
+        }
+
+        if (actions.Any(item => item.Behavior == WindowsDisplayBehavior.MirrorPrimary) &&
+            !_topology.MirrorAll(out var mirrorError))
+        {
+            errors.Add(mirrorError);
+        }
+    }
+
+    private async Task ApplyDisabledBehaviorsAsync(
+        IReadOnlyCollection<(MonitorDefinition Monitor, WindowsDisplayBehavior Behavior)> actions,
+        ICollection<string> errors)
+    {
+        foreach (var action in actions.Where(item => item.Behavior == WindowsDisplayBehavior.Disabled))
+            await DisableAndVerifyAsync(action.Monitor, errors);
+    }
+
+    private async Task DisableAndVerifyAsync(MonitorDefinition monitor, ICollection<string> errors)
+    {
+        const int maximumPolls = 10;
+        const int stableInactivePollsRequired = 4;
+        var stableInactivePolls = 0;
+        var lastError = "";
+
+        for (var poll = 0; poll < maximumPolls; poll++)
+        {
+            if (_topology.IsActive(monitor))
+            {
+                stableInactivePolls = 0;
+                if (!_topology.Disable(monitor, out var error)) lastError = error;
+            }
+            else
+            {
+                stableInactivePolls++;
+                if (stableInactivePolls >= stableInactivePollsRequired) return;
+            }
+
+            if (poll + 1 < maximumPolls) await Task.Delay(500);
+        }
+
+        var detail = _topology.IsActive(monitor)
+            ? string.IsNullOrWhiteSpace(lastError)
+                ? "Windows kept the display attached to the desktop."
+                : lastError
+            : "The detached state did not remain stable long enough to verify.";
+        errors.Add($"{monitor.DisplayLabel}: {detail}");
     }
 }

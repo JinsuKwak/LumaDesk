@@ -5,6 +5,32 @@ namespace DesCon.Windows.Services;
 
 public sealed class DisplayTopologyService
 {
+    public bool IsActive(MonitorDefinition monitor)
+    {
+        if (string.IsNullOrWhiteSpace(monitor.GdiDeviceName)) return false;
+
+        var mode = NativeMethods.DEVMODE.Create();
+        var hasCurrentMode = NativeMethods.EnumDisplaySettingsEx(
+            monitor.GdiDeviceName,
+            NativeMethods.ENUM_CURRENT_SETTINGS,
+            ref mode,
+            0);
+
+        var attachedToDesktop = false;
+        for (uint index = 0; ; index++)
+        {
+            var adapter = NativeMethods.DISPLAY_DEVICE.Create();
+            if (!NativeMethods.EnumDisplayDevices(null, index, ref adapter, 0)) break;
+            if (!string.Equals(adapter.DeviceName, monitor.GdiDeviceName, StringComparison.OrdinalIgnoreCase)) continue;
+            attachedToDesktop = (adapter.StateFlags & NativeMethods.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
+            break;
+        }
+
+        // Treat either signal as active. Some display drivers update the GDI
+        // mode and DISPLAY_DEVICE flag on slightly different schedules.
+        return hasCurrentMode || attachedToDesktop;
+    }
+
     public bool MakePrimary(MonitorDefinition target, out string error)
     {
         error = "";
@@ -50,14 +76,26 @@ public sealed class DisplayTopologyService
     public bool Disable(MonitorDefinition monitor, out string error)
     {
         error = "";
+        if (string.IsNullOrWhiteSpace(monitor.GdiDeviceName))
+        {
+            error = "The display has no Windows device mapping.";
+            return false;
+        }
+        if (!IsActive(monitor)) return true;
+
         var mode = NativeMethods.DEVMODE.Create();
-        if (!NativeMethods.EnumDisplaySettingsEx(monitor.GdiDeviceName, NativeMethods.ENUM_CURRENT_SETTINGS, ref mode, 0))
-            return true; // Already absent or disabled.
+        NativeMethods.EnumDisplaySettingsEx(
+            monitor.GdiDeviceName,
+            NativeMethods.ENUM_CURRENT_SETTINGS,
+            ref mode,
+            0);
 
         // Microsoft documents DM_POSITION with a zero width/height as the
         // detach operation. Keep this temporary so ENUM_REGISTRY_SETTINGS
         // remains a reliable restore point when the profile hands it back.
         mode.dmFields = NativeMethods.DM_POSITION;
+        mode.dmPosition.x = 0;
+        mode.dmPosition.y = 0;
         mode.dmPelsWidth = 0;
         mode.dmPelsHeight = 0;
         var result = NativeMethods.ChangeDisplaySettingsEx(
