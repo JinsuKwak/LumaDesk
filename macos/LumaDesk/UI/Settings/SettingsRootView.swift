@@ -644,9 +644,15 @@ struct SettingsRootView: View {
                             )
                             unlockedDDCDisplays.removeAll()
                         }
-                        .disabled(!hasUnsavedDisplaySwitchChanges || !areProfileNamesValid)
+                        .disabled(!hasUnsavedDisplaySwitchChanges || !areProfileNamesValid || !arePairingIDsValid)
                     }
                     .padding(.top, 4)
+
+                    if !arePairingIDsValid {
+                        Text("Pairing IDs must be unique on this device.")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
 
@@ -771,11 +777,12 @@ struct SettingsRootView: View {
         let configuration = monitorDDCDraft(for: snapshot)
         let isUnlocked = unlockedDDCDisplays.contains(snapshot.id)
 
-        return HStack(alignment: .center, spacing: 12) {
+        return HStack(alignment: .top, spacing: 12) {
             Image(systemName: "display")
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(.secondary)
                 .frame(width: 24)
+                .padding(.top, 3)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .center, spacing: 12) {
@@ -845,6 +852,28 @@ struct SettingsRootView: View {
                     }
                     .help(displayInputStatusText(snapshot))
                 }
+
+                if isUnlocked {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text("Pairing ID")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        TextField(
+                            "desk-center",
+                            text: pairingIDBinding(forDisplayID: snapshot.id, configuration: configuration)
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .font(.caption.monospaced())
+                        .help("Use the same Pairing ID for this physical monitor on Mac and Windows.")
+
+                        Text("Same value on both devices")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                    .padding(.top, 5)
+                }
             }
             .frame(maxWidth: .infinity)
         }
@@ -873,6 +902,14 @@ struct SettingsRootView: View {
             || defaultSwitchingProfileID != appState.preferences.displaySync.defaultSwitchingProfileID
     }
 
+    private var arePairingIDsValid: Bool {
+        let pairingIDs = monitorDDCDrafts.values.compactMap { configuration -> String? in
+            let value = configuration.pairingID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return value.isEmpty ? nil : value
+        }
+        return Set(pairingIDs).count == pairingIDs.count
+    }
+
     private func loadDisplaySwitchDrafts(_ snapshots: [DisplaySyncSnapshot]) {
         for snapshot in snapshots where monitorDDCDrafts[snapshot.id] == nil {
             monitorDDCDrafts[snapshot.id] = snapshot.ddcConfiguration
@@ -891,6 +928,18 @@ struct SettingsRootView: View {
         var configuration = monitorDDCDrafts[displayID] ?? .standardDefault
         update(&configuration)
         monitorDDCDrafts[displayID] = configuration
+    }
+
+    private func pairingIDBinding(
+        forDisplayID displayID: String,
+        configuration: MonitorDDCConfiguration
+    ) -> Binding<String> {
+        Binding(
+            get: { monitorDDCDrafts[displayID]?.pairingID ?? configuration.pairingID ?? "" },
+            set: { value in
+                updateDDCDraft(forDisplayID: displayID) { $0.pairingID = value }
+            }
+        )
     }
 
     private func switchingProfileRow(_ index: Int) -> some View {
@@ -955,26 +1004,15 @@ struct SettingsRootView: View {
                 .frame(width: 132)
 
                 if switchingProfileDrafts[index].coordinationMode == .managed {
-                    Picker("", selection: Binding(
-                        get: { switchingProfileDrafts[index].managedTarget },
-                        set: { switchingProfileDrafts[index].managedTarget = $0 }
-                    )) {
-                        ForEach(ManagedProfileTarget.allCases) { target in
-                            Text("To \(target.title)").tag(target)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 92)
+                    Text("Mac → Windows")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 } else {
-                    TextField("External device name", text: Binding(
-                        get: { switchingProfileDrafts[index].externalTargetName },
-                        set: { switchingProfileDrafts[index].externalTargetName = $0 }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .controlSize(.small)
-                    .frame(width: 150)
+                    Text("One-way DDC")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 Spacer(minLength: 8)
@@ -992,50 +1030,64 @@ struct SettingsRootView: View {
             .padding(.leading, 25)
 
             ForEach(appState.displaySyncSnapshots) { snapshot in
-                HStack(alignment: .center, spacing: 7) {
-                    Toggle("", isOn: profileAssignmentEnabledBinding(profileIndex: index, displayID: snapshot.id))
-                    .labelsHidden()
-                    .toggleStyle(.checkbox)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .center, spacing: 7) {
+                        Toggle("", isOn: profileAssignmentEnabledBinding(profileIndex: index, displayID: snapshot.id))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
 
-                    Text("Display \(snapshot.displayNumber) ·")
-                        .font(.caption)
-                        .fixedSize(horizontal: true, vertical: false)
+                        Text("Display \(snapshot.displayNumber) ·")
+                            .font(.caption)
+                            .fixedSize(horizontal: true, vertical: false)
 
-                    Text(snapshot.name)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .layoutPriority(-1)
+                        Text(snapshot.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .layoutPriority(-1)
 
-                    Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
-                    labeledHexField(
-                        "Input",
-                        value: profileInputBinding(profileIndex: index, displayID: snapshot.id),
-                        width: 58
-                    )
-                    .disabled(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil)
-                    .opacity(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil ? 0.45 : 1)
+                        labeledHexField(
+                            "Input",
+                            value: profileInputBinding(profileIndex: index, displayID: snapshot.id),
+                            width: 58
+                        )
+                        .disabled(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil)
+                        .opacity(switchingProfileDrafts[index].inputAssignments[snapshot.id] == nil ? 0.45 : 1)
+                    }
 
-                    Picker("Mac", selection: macBehaviorBinding(profileIndex: index, displayID: snapshot.id)) {
-                        ForEach(MacDisplayBehavior.allCases) { behavior in
-                            Text(behavior.title).tag(behavior)
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Display behavior")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        Spacer(minLength: 8)
+
+                        Picker("This Mac", selection: macBehaviorBinding(profileIndex: index, displayID: snapshot.id)) {
+                            ForEach(MacDisplayBehavior.allCases) { behavior in
+                                Text(behavior.title).tag(behavior)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .frame(width: 150)
+
+                        if switchingProfileDrafts[index].coordinationMode == .managed {
+                            Picker("Windows", selection: windowsBehaviorBinding(profileIndex: index, displayID: snapshot.id)) {
+                                ForEach(WindowsDisplayBehavior.allCases) { behavior in
+                                    Text(behavior.title).tag(behavior)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .controlSize(.small)
+                            .frame(width: 160)
                         }
                     }
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 124)
-
-                    Picker("Windows", selection: windowsBehaviorBinding(profileIndex: index, displayID: snapshot.id)) {
-                        ForEach(WindowsDisplayBehavior.allCases) { behavior in
-                            Text(behavior.title).tag(behavior)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .controlSize(.small)
-                    .frame(width: 124)
+                    .padding(.leading, 25)
                 }
                 .padding(.leading, 14)
+                .padding(.vertical, 3)
             }
         }
         .padding(.vertical, 4)

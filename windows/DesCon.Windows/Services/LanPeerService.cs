@@ -326,7 +326,6 @@ public sealed record WireProfile(
     string Name,
     ProfileCoordinationMode CoordinationMode,
     ManagedProfileTarget ManagedTarget,
-    string ExternalTargetName,
     IReadOnlyList<WireMonitorAction> Monitors)
 {
     public static WireProfile From(SwitchingProfile profile, IReadOnlyCollection<MonitorDefinition> monitors)
@@ -338,8 +337,8 @@ public sealed record WireProfile(
             var mac = profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged);
             var windows = profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged);
             if (input is null && mac == MacDisplayBehavior.Unchanged && windows == WindowsDisplayBehavior.Unchanged) continue;
-            actions.Add(new WireMonitorAction(monitor.SharedId, input, mac, windows));
+            actions.Add(new WireMonitorAction(monitor.NetworkIdentity, input, mac, windows));
         }
-        return new WireProfile(profile.Id, profile.Name, profile.CoordinationMode, profile.ManagedTarget, profile.ExternalTargetName, actions);
+        return new WireProfile(profile.Id, profile.Name, profile.CoordinationMode, ManagedProfileTarget.MacOS, actions);
     }
 }

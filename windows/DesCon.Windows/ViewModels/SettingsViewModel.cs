@@ -24,6 +24,7 @@ public sealed class MonitorEditorViewModel : ObservableModel
     public MonitorDefinition Model { get; }
     private string _source;
     private string _vcp;
+    private string _pairingId;
     private bool _isLocked = true;
 
     public MonitorEditorViewModel(MonitorDefinition model)
@@ -31,12 +32,14 @@ public sealed class MonitorEditorViewModel : ObservableModel
         Model = model;
         _source = model.Ddc.SourceAddress.ToString("X2");
         _vcp = model.Ddc.VcpCode.ToString("X2");
+        _pairingId = model.PairingId;
     }
 
     public string Name => Model.Name;
     public string Detail => $"Display {Model.DisplayNumber} · {(Model.IsConnected ? "Connected" : "Offline")}";
     public string Source { get => _source; set => Set(ref _source, value.ToUpperInvariant()); }
     public string Vcp { get => _vcp; set => Set(ref _vcp, value.ToUpperInvariant()); }
+    public string PairingId { get => _pairingId; set => Set(ref _pairingId, value); }
     public bool IsLocked
     {
         get => _isLocked;
@@ -66,6 +69,7 @@ public sealed class MonitorEditorViewModel : ObservableModel
         }
         Model.Ddc.SourceAddress = source;
         Model.Ddc.VcpCode = vcp;
+        Model.PairingId = PairingId.Trim();
         IsLocked = true;
         return true;
     }
@@ -77,6 +81,7 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
     private string _input;
     private MacDisplayBehavior _macBehavior;
     private WindowsDisplayBehavior _behavior;
+    private bool _showMacBehavior;
 
     public string MonitorID { get; }
     private readonly MonitorDefinition _monitor;
@@ -89,6 +94,7 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
         _input = (_isIncluded ? value : (ushort)0).ToString("X4");
         _macBehavior = profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged);
         _behavior = profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged);
+        _showMacBehavior = profile.CoordinationMode == ProfileCoordinationMode.Managed;
     }
 
     public bool IsIncluded { get => _isIncluded; set => Set(ref _isIncluded, value); }
@@ -96,6 +102,7 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
     public string Input { get => _input; set => Set(ref _input, value.ToUpperInvariant()); }
     public MacDisplayBehavior MacBehavior { get => _macBehavior; set => Set(ref _macBehavior, value); }
     public WindowsDisplayBehavior Behavior { get => _behavior; set => Set(ref _behavior, value); }
+    public bool ShowMacBehavior { get => _showMacBehavior; set => Set(ref _showMacBehavior, value); }
     public Array MacBehaviors => Enum.GetValues<MacDisplayBehavior>();
     public Array Behaviors => Enum.GetValues<WindowsDisplayBehavior>();
 
@@ -131,8 +138,6 @@ public sealed class ProfileEditorViewModel : ObservableModel
     public SwitchingProfile Model { get; }
     private string _name;
     private ProfileCoordinationMode _coordinationMode;
-    private ManagedProfileTarget _managedTarget;
-    private string _externalTargetName;
     private bool _isFavorite;
     private string _hotKeyText;
 
@@ -141,8 +146,6 @@ public sealed class ProfileEditorViewModel : ObservableModel
         Model = model;
         _name = model.Name;
         _coordinationMode = model.CoordinationMode;
-        _managedTarget = model.ManagedTarget;
-        _externalTargetName = model.ExternalTargetName;
         _isFavorite = favoriteID == model.Id;
         _hotKeyText = model.WindowsHotKey?.DisplayText ?? "Set shortcut";
         Monitors = new ObservableCollection<ProfileMonitorRowViewModel>(monitors.Select(item => new ProfileMonitorRowViewModel(item, model)));
@@ -150,10 +153,19 @@ public sealed class ProfileEditorViewModel : ObservableModel
 
     public Guid Id => Model.Id;
     public string Name { get => _name; set => Set(ref _name, value); }
-    public ProfileCoordinationMode CoordinationMode { get => _coordinationMode; set { if (Set(ref _coordinationMode, value)) Changed(nameof(IsExternal)); } }
-    public ManagedProfileTarget ManagedTarget { get => _managedTarget; set => Set(ref _managedTarget, value); }
-    public string ExternalTargetName { get => _externalTargetName; set => Set(ref _externalTargetName, value); }
+    public ProfileCoordinationMode CoordinationMode
+    {
+        get => _coordinationMode;
+        set
+        {
+            if (!Set(ref _coordinationMode, value)) return;
+            Changed(nameof(IsExternal));
+            Changed(nameof(DirectionLabel));
+            foreach (var monitor in Monitors) monitor.ShowMacBehavior = value == ProfileCoordinationMode.Managed;
+        }
+    }
     public bool IsExternal => CoordinationMode == ProfileCoordinationMode.External;
+    public string DirectionLabel => IsExternal ? "One-way DDC" : "Windows → Mac";
     public bool IsFavorite
     {
         get => _isFavorite;
@@ -165,13 +177,16 @@ public sealed class ProfileEditorViewModel : ObservableModel
     public string FavoriteGlyph => IsFavorite ? "★" : "☆";
     public string HotKeyText { get => _hotKeyText; set => Set(ref _hotKeyText, value); }
     public Array CoordinationModes => Enum.GetValues<ProfileCoordinationMode>();
-    public Array ManagedTargets => Enum.GetValues<ManagedProfileTarget>();
     public ObservableCollection<ProfileMonitorRowViewModel> Monitors { get; }
 
     public void EnsureMonitor(MonitorDefinition monitor)
     {
         var existing = Monitors.FirstOrDefault(item => string.Equals(item.MonitorID, monitor.Id, StringComparison.OrdinalIgnoreCase));
-        if (existing is null) Monitors.Add(new ProfileMonitorRowViewModel(monitor, Model));
+        if (existing is null)
+        {
+            var row = new ProfileMonitorRowViewModel(monitor, Model) { ShowMacBehavior = CoordinationMode == ProfileCoordinationMode.Managed };
+            Monitors.Add(row);
+        }
         else existing.Refresh();
     }
 
@@ -180,8 +195,6 @@ public sealed class ProfileEditorViewModel : ObservableModel
         error = "";
         Model.Name = Name.Trim();
         Model.CoordinationMode = CoordinationMode;
-        Model.ManagedTarget = ManagedTarget;
-        Model.ExternalTargetName = string.IsNullOrWhiteSpace(ExternalTargetName) ? "External device" : ExternalTargetName.Trim();
         foreach (var row in Monitors)
             if (!row.Apply(Model, out error)) return false;
         return true;
@@ -266,6 +279,16 @@ public sealed class SettingsViewModel : ObservableModel
         if (names.Any(string.IsNullOrWhiteSpace) || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
         {
             Status = "Profile names must be unique and cannot be empty.";
+            return false;
+        }
+
+        var pairingIDs = Monitors
+            .Select(item => item.PairingId.Trim())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .ToList();
+        if (pairingIDs.Distinct(StringComparer.OrdinalIgnoreCase).Count() != pairingIDs.Count)
+        {
+            Status = "Pairing IDs must be unique on this device.";
             return false;
         }
 

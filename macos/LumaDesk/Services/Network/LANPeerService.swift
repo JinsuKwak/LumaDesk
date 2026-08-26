@@ -14,7 +14,6 @@ struct WireProfile: Codable, Equatable {
     var name: String
     var coordinationMode: ProfileCoordinationMode
     var managedTarget: ManagedProfileTarget
-    var externalTargetName: String
     var monitors: [WireMonitorAction]
 }
 

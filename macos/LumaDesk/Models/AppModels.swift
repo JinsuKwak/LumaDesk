@@ -603,6 +603,7 @@ struct DisplaySwitchProfile: Codable, Equatable {
 struct MonitorDDCConfiguration: Codable, Equatable {
     var packetSourceAddress: UInt8 = 0x51
     var vcpCode: UInt8 = 0x60
+    var pairingID: String?
 
     static let standardDefault = MonitorDDCConfiguration()
 
@@ -617,6 +618,13 @@ struct MonitorDDCConfiguration: Codable, Equatable {
             value: value,
             canVerifyCurrentInput: packetSourceAddress == 0x51 && vcpCode == 0x60
         )
+    }
+
+    func networkIdentity(fallback: String) -> String {
+        guard let pairingID = pairingID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !pairingID.isEmpty
+        else { return fallback }
+        return "PAIR:\(pairingID.lowercased())"
     }
 }
 
@@ -711,8 +719,6 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
     var id: UUID = UUID()
     var name: String
     var coordinationMode: ProfileCoordinationMode = .managed
-    var managedTarget: ManagedProfileTarget = .windows
-    var externalTargetName: String = "External device"
     var inputAssignments: [String: UInt16] = [:]
     var macDisplayBehaviors: [String: MacDisplayBehavior] = [:]
     var windowsDisplayBehaviors: [String: WindowsDisplayBehavior] = [:]
@@ -723,8 +729,6 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         case id
         case name
         case coordinationMode
-        case managedTarget
-        case externalTargetName
         case inputAssignments
         case macDisplayBehaviors
         case windowsDisplayBehaviors
@@ -736,8 +740,6 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         id: UUID = UUID(),
         name: String,
         coordinationMode: ProfileCoordinationMode = .managed,
-        managedTarget: ManagedProfileTarget = .windows,
-        externalTargetName: String = "External device",
         inputAssignments: [String: UInt16] = [:],
         macDisplayBehaviors: [String: MacDisplayBehavior] = [:],
         windowsDisplayBehaviors: [String: WindowsDisplayBehavior] = [:],
@@ -747,8 +749,6 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         self.id = id
         self.name = name
         self.coordinationMode = coordinationMode
-        self.managedTarget = managedTarget
-        self.externalTargetName = externalTargetName
         self.inputAssignments = inputAssignments
         self.macDisplayBehaviors = macDisplayBehaviors
         self.windowsDisplayBehaviors = windowsDisplayBehaviors
@@ -763,8 +763,6 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         // Existing profiles were intentionally one-way. Preserve that behavior
         // until the user explicitly opts a profile into Mac + Windows handshakes.
         coordinationMode = try container.decodeIfPresent(ProfileCoordinationMode.self, forKey: .coordinationMode) ?? .external
-        managedTarget = try container.decodeIfPresent(ManagedProfileTarget.self, forKey: .managedTarget) ?? .windows
-        externalTargetName = try container.decodeIfPresent(String.self, forKey: .externalTargetName) ?? "External device"
         inputAssignments = try container.decodeIfPresent([String: UInt16].self, forKey: .inputAssignments) ?? [:]
         macDisplayBehaviors = try container.decodeIfPresent([String: MacDisplayBehavior].self, forKey: .macDisplayBehaviors) ?? [:]
         windowsDisplayBehaviors = try container.decodeIfPresent([String: WindowsDisplayBehavior].self, forKey: .windowsDisplayBehaviors) ?? [:]

@@ -82,31 +82,56 @@
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type viewModels:MonitorEditorViewModel}">
                                     <Border Style="{StaticResource CardStyle}">
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="65" />
-                                                <ColumnDefinition Width="54" />
-                                                <ColumnDefinition Width="58" />
-                                                <ColumnDefinition Width="54" />
-                                                <ColumnDefinition Width="34" />
-                                            </Grid.ColumnDefinitions>
-                                            <StackPanel VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                                <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="0,3,0,0" />
-                                            </StackPanel>
-                                            <TextBlock Grid.Column="1" Text="Source" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
-                                            <TextBox Grid.Column="2" Text="{Binding Source, UpdateSourceTrigger=PropertyChanged}" MaxLength="2" TextAlignment="Center" IsReadOnly="{Binding IsLocked}" />
-                                            <TextBlock Grid.Column="3" Text="VCP" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" />
-                                            <TextBox Grid.Column="4" Text="{Binding Vcp, UpdateSourceTrigger=PropertyChanged}" MaxLength="2" TextAlignment="Center" IsReadOnly="{Binding IsLocked}" />
-                                            <Button Grid.Column="5" Content="{Binding LockGlyph}" FontFamily="Segoe Fluent Icons" Padding="0" Margin="8,0,0,0"
-                                                    Background="Transparent" BorderThickness="0" Click="LockMonitorClicked" ToolTip="Unlock or lock DDC fields" />
-                                        </Grid>
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="65" />
+                                                    <ColumnDefinition Width="54" />
+                                                    <ColumnDefinition Width="58" />
+                                                    <ColumnDefinition Width="54" />
+                                                    <ColumnDefinition Width="34" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Detail}" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="0,3,0,0" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1" Text="Source" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="2" Text="{Binding Source, UpdateSourceTrigger=PropertyChanged}" MaxLength="2" TextAlignment="Center" IsReadOnly="{Binding IsLocked}" />
+                                                <TextBlock Grid.Column="3" Text="VCP" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                                                <TextBox Grid.Column="4" Text="{Binding Vcp, UpdateSourceTrigger=PropertyChanged}" MaxLength="2" TextAlignment="Center" IsReadOnly="{Binding IsLocked}" />
+                                                <Button Grid.Column="5" Content="{Binding LockGlyph}" FontFamily="Segoe Fluent Icons" Padding="0" Margin="8,0,0,0"
+                                                        Background="Transparent" BorderThickness="0" Click="LockMonitorClicked" ToolTip="Unlock monitor settings" />
+                                            </Grid>
+
+                                            <Grid Margin="0,12,34,0">
+                                                <Grid.Style>
+                                                    <Style TargetType="Grid">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsLocked}" Value="False">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Grid.Style>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="76" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="Pairing ID" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" VerticalAlignment="Center" />
+                                                <TextBox Grid.Column="1" Text="{Binding PairingId, UpdateSourceTrigger=PropertyChanged}" Padding="8,4"
+                                                         ToolTip="Use the same Pairing ID for this physical monitor on Mac and Windows." />
+                                                <TextBlock Grid.Column="2" Text="Same value on both devices" Foreground="{DynamicResource SecondaryTextBrush}"
+                                                           FontSize="10" VerticalAlignment="Center" Margin="10,0,0,0" />
+                                            </Grid>
+                                        </StackPanel>
                                     </Border>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <TextBlock Text="Unlock a monitor to edit Source/VCP; changes take effect only after Save. Source is the DDC packet source address, not a monitor input. LG DDC2AB: Source 50 · VCP F4 · HDMI 1 0090 · HDMI 2 0091 · DisplayPort 00D0."
+                        <TextBlock Text="Unlock a monitor to edit Source, VCP, and Pairing ID; changes take effect only after Save. Use the same Pairing ID for the same physical monitor on Mac and Windows. Source is the DDC packet source address, not a monitor input. LG DDC2AB: Source 50 · VCP F4 · HDMI 1 0090 · HDMI 2 0091 · DisplayPort 00D0."
                                    TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="3,2,3,8" />
                     </StackPanel>
                 </ScrollViewer>
@@ -143,38 +168,36 @@
                                             <Grid Margin="34,9,0,8">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="155" /><ColumnDefinition Width="155" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                                 <ComboBox ItemsSource="{Binding CoordinationModes}" SelectedItem="{Binding CoordinationMode}" />
-                                                <ComboBox Grid.Column="1" ItemsSource="{Binding ManagedTargets}" SelectedItem="{Binding ManagedTarget}" Margin="8,0,0,0">
-                                                    <ComboBox.Style>
-                                                        <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
-                                                            <Style.Triggers><DataTrigger Binding="{Binding IsExternal}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
-                                                        </Style>
-                                                    </ComboBox.Style>
-                                                </ComboBox>
-                                                <TextBox Grid.Column="1" Text="{Binding ExternalTargetName, UpdateSourceTrigger=PropertyChanged}" Margin="8,0,0,0">
-                                                    <TextBox.Style>
-                                                        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
-                                                            <Setter Property="Visibility" Value="Collapsed" />
-                                                            <Style.Triggers><DataTrigger Binding="{Binding IsExternal}" Value="True"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers>
-                                                        </Style>
-                                                    </TextBox.Style>
-                                                </TextBox>
+                                                <TextBlock Grid.Column="1" Text="{Binding DirectionLabel}" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource SecondaryTextBrush}" />
                                             </Grid>
 
                                             <ItemsControl ItemsSource="{Binding Monitors}" Margin="34,0,0,0">
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate DataType="{x:Type viewModels:ProfileMonitorRowViewModel}">
-                                                        <Grid Margin="0,5,0,0">
+                                                        <Grid Margin="0,6,0,2">
+                                                            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="24" /><ColumnDefinition Width="*" />
                                                                 <ColumnDefinition Width="44" /><ColumnDefinition Width="66" />
-                                                                <ColumnDefinition Width="120" /><ColumnDefinition Width="130" />
                                                             </Grid.ColumnDefinitions>
                                                             <CheckBox IsChecked="{Binding IsIncluded}" />
                                                             <TextBlock Grid.Column="1" Text="{Binding Label}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="12" />
                                                             <TextBlock Grid.Column="2" Text="Input" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="11" />
                                                             <TextBox Grid.Column="3" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" MaxLength="4" TextAlignment="Center" Padding="5,3" />
-                                                            <ComboBox Grid.Column="4" ItemsSource="{Binding MacBehaviors}" SelectedItem="{Binding MacBehavior}" Margin="8,0,0,0" Padding="5,2" ToolTip="macOS display behavior" />
-                                                            <ComboBox Grid.Column="5" ItemsSource="{Binding Behaviors}" SelectedItem="{Binding Behavior}" Margin="8,0,0,0" Padding="5,2" ToolTip="Windows display behavior" />
+                                                            <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+                                                                <TextBlock Text="Display behavior" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="11" Margin="0,0,12,0" />
+                                                                <StackPanel Orientation="Horizontal">
+                                                                    <StackPanel.Style>
+                                                                        <Style TargetType="StackPanel">
+                                                                            <Style.Triggers><DataTrigger Binding="{Binding ShowMacBehavior}" Value="False"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+                                                                        </Style>
+                                                                    </StackPanel.Style>
+                                                                    <TextBlock Text="Mac" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="11" Margin="0,0,5,0" />
+                                                                    <ComboBox Width="118" ItemsSource="{Binding MacBehaviors}" SelectedItem="{Binding MacBehavior}" Padding="5,2" ToolTip="macOS display behavior" />
+                                                                </StackPanel>
+                                                                <TextBlock Text="Windows" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="11" Margin="10,0,5,0" />
+                                                                <ComboBox Width="128" ItemsSource="{Binding Behaviors}" SelectedItem="{Binding Behavior}" Padding="5,2" ToolTip="Windows display behavior" />
+                                                            </StackPanel>
                                                         </Grid>
                                                     </DataTemplate>
                                                 </ItemsControl.ItemTemplate>

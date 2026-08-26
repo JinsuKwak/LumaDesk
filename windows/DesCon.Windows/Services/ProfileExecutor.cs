@@ -112,8 +112,8 @@ public sealed class ProfileExecutor
             StatusChanged?.Invoke($"Applying {wireProfile.Name} from Mac…");
             await Task.Delay(900);
             var monitors = _settings().Monitors
-                .Where(item => !string.IsNullOrWhiteSpace(item.SharedId))
-                .GroupBy(item => item.SharedId, StringComparer.OrdinalIgnoreCase)
+                .Where(item => !string.IsNullOrWhiteSpace(item.NetworkIdentity))
+                .GroupBy(item => item.NetworkIdentity, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(item => item.Key, item => item.First(), StringComparer.OrdinalIgnoreCase);
             var errors = new List<string>();
 

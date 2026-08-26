@@ -20,6 +20,11 @@ public sealed class MonitorDefinition
 {
     public string Id { get; set; } = "";
     public string SharedId { get; set; } = "";
+    public string PairingId { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string NetworkIdentity => string.IsNullOrWhiteSpace(PairingId)
+        ? SharedId
+        : $"PAIR:{PairingId.Trim().ToLowerInvariant()}";
     public string Name { get; set; } = "External display";
     public int DisplayNumber { get; set; }
     public string GdiDeviceName { get; set; } = "";
@@ -40,8 +45,6 @@ public sealed class SwitchingProfile
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Profile";
     public ProfileCoordinationMode CoordinationMode { get; set; } = ProfileCoordinationMode.Managed;
-    public ManagedProfileTarget ManagedTarget { get; set; } = ManagedProfileTarget.MacOS;
-    public string ExternalTargetName { get; set; } = "External device";
     public Dictionary<string, ushort> InputAssignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, MacDisplayBehavior> MacDisplayBehaviors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, WindowsDisplayBehavior> WindowsDisplayBehaviors { get; set; } = new(StringComparer.OrdinalIgnoreCase);

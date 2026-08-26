@@ -40,8 +40,6 @@
         "id": { "type": "string", "format": "uuid" },
         "name": { "type": "string", "minLength": 1 },
         "coordinationMode": { "enum": ["managed", "external"] },
-        "managedTarget": { "enum": ["macOS", "windows"] },
-        "externalTargetName": { "type": "string" },
         "inputAssignments": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 65535 }

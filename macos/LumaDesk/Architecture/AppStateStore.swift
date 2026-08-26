@@ -545,7 +545,12 @@ final class AppStateStore: ObservableObject {
         let names = normalizedProfiles.map { $0.name.lowercased() }
         guard !names.contains(where: \.isEmpty), Set(names).count == names.count else { return }
 
-        preferences.displaySync.monitorDDCConfigurations = monitorConfigurations
+        preferences.displaySync.monitorDDCConfigurations = monitorConfigurations.mapValues { configuration in
+            var normalized = configuration
+            let pairingID = configuration.pairingID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            normalized.pairingID = pairingID.isEmpty ? nil : pairingID
+            return normalized
+        }
         preferences.displaySync.switchingProfiles = normalizedProfiles
         preferences.displaySync.defaultSwitchingProfileID = normalizedProfiles.contains(where: { $0.id == defaultProfileID })
             ? defaultProfileID

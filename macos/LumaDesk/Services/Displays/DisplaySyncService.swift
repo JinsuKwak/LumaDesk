@@ -496,7 +496,7 @@ final class DisplaySyncService {
             let windowsBehavior = profile.windowsDisplayBehaviors[session.id] ?? .unchanged
             guard input != nil || macBehavior != .unchanged || windowsBehavior != .unchanged else { return nil }
             return WireMonitorAction(
-                sharedID: session.sharedID,
+                sharedID: networkIdentity(for: session),
                 inputValue: input,
                 macBehavior: macBehavior.rawValue,
                 windowsBehavior: windowsBehavior
@@ -507,8 +507,7 @@ final class DisplaySyncService {
             id: profile.id,
             name: profile.name,
             coordinationMode: profile.coordinationMode,
-            managedTarget: profile.managedTarget,
-            externalTargetName: profile.externalTargetName,
+            managedTarget: .windows,
             monitors: actions
         )
     }
@@ -516,15 +515,13 @@ final class DisplaySyncService {
     private func applyRemoteProfile(_ wireProfile: WireProfile) async {
         await reconcileDisplays()
         let localIDBySharedID = Dictionary(
-            sessions.values.map { ($0.sharedID.lowercased(), $0.id) },
+            sessions.values.map { (networkIdentity(for: $0).lowercased(), $0.id) },
             uniquingKeysWith: { first, _ in first }
         )
         var profile = DisplaySwitchingProfile(
             id: wireProfile.id,
             name: wireProfile.name,
-            coordinationMode: wireProfile.coordinationMode,
-            managedTarget: wireProfile.managedTarget,
-            externalTargetName: wireProfile.externalTargetName
+            coordinationMode: wireProfile.coordinationMode
         )
 
         for action in wireProfile.monitors {
@@ -539,6 +536,11 @@ final class DisplaySyncService {
         activeRemoteProfile = profile
         applyTopology(profile)
         statusHandler?("\(profile.name) applied")
+    }
+
+    private func networkIdentity(for session: ManagedDisplaySession) -> String {
+        let configuration = settings.monitorDDCConfigurations[session.id] ?? .standardDefault
+        return configuration.networkIdentity(fallback: session.sharedID)
     }
 
     private func publishSnapshots() {
