@@ -41,6 +41,8 @@ public sealed class GlobalHotKeyService : IDisposable
         return errors;
     }
 
+    public void Suspend() => Clear();
+
     public void Dispose()
     {
         Clear();

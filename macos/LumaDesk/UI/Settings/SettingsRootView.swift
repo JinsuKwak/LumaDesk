@@ -1159,7 +1159,7 @@ struct SettingsRootView: View {
                 ShortcutRecorder(hotKey: Binding(
                     get: { switchingProfileDrafts[index].macHotKey },
                     set: { switchingProfileDrafts[index].macHotKey = $0 }
-                ))
+                ), onRecordingChanged: appState.setGlobalHotKeyRecordingActive)
                 .frame(width: 122, height: 22)
             }
             .padding(.leading, 25)

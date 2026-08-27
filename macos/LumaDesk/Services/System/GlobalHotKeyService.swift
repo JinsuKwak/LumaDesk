@@ -37,9 +37,7 @@ final class GlobalHotKeyService {
         profiles: [DisplaySwitchingProfile],
         onProfile: @escaping (UUID) -> Void
     ) -> [String] {
-        registrations.values.forEach { UnregisterEventHotKey($0) }
-        registrations.removeAll()
-        profileByRegistrationID.removeAll()
+        unregisterAll()
         self.onProfile = onProfile
 
         var errors: [String] = []
@@ -68,6 +66,12 @@ final class GlobalHotKeyService {
         }
 
         return errors
+    }
+
+    func unregisterAll() {
+        registrations.values.forEach { UnregisterEventHotKey($0) }
+        registrations.removeAll()
+        profileByRegistrationID.removeAll()
     }
 
     fileprivate func handle(event: EventRef?) -> OSStatus {

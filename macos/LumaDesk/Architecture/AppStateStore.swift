@@ -28,6 +28,7 @@ final class AppStateStore: ObservableObject {
     private var pendingStaticOutputTask: Task<Void, Never>?
     private var lastStaticOutputDate: Date?
     private var wakeLightingTask: Task<Void, Never>?
+    private var isRecordingGlobalHotKey = false
 
     init(
         preferencesStore: PreferencesStore,
@@ -577,6 +578,16 @@ final class AppStateStore: ObservableObject {
         displaySyncService.switchAway(profileID: profileID)
     }
 
+    func setGlobalHotKeyRecordingActive(_ active: Bool) {
+        guard isRecordingGlobalHotKey != active else { return }
+        isRecordingGlobalHotKey = active
+        if active {
+            globalHotKeyService.unregisterAll()
+        } else {
+            registerGlobalHotKeys()
+        }
+    }
+
     func refreshDisplaySync() {
         displaySyncService.refreshNow()
     }
@@ -803,6 +814,7 @@ final class AppStateStore: ObservableObject {
     }
 
     private func registerGlobalHotKeys() {
+        guard !isRecordingGlobalHotKey else { return }
         let failures = globalHotKeyService.register(profiles: preferences.displaySync.switchingProfiles) { [weak self] profileID in
             self?.switchDisplaysAway(profileID: profileID)
         }

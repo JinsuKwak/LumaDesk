@@ -216,6 +216,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
     private ProfileCoordinationMode _coordinationMode;
     private bool _isFavorite;
     private string _hotKeyText;
+    private WindowsGlobalHotKey? _windowsHotKey;
     private ProfilePrimaryMonitorOption? _selfPrimaryMonitor;
     private ProfilePrimaryMonitorOption? _peerPrimaryMonitor;
     private ProfilePrimaryMonitorOption? _layoutPrimaryMonitor;
@@ -227,6 +228,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
         _name = model.Name;
         _coordinationMode = model.CoordinationMode;
         _isFavorite = favoriteID == model.Id;
+        _windowsHotKey = model.WindowsHotKey;
         _hotKeyText = model.WindowsHotKey?.DisplayText ?? "Set shortcut";
         Monitors = new ObservableCollection<ProfileMonitorRowViewModel>(monitorList.Select(item => new ProfileMonitorRowViewModel(item, model)));
         PrimaryMonitorOptions = new ObservableCollection<ProfilePrimaryMonitorOption>(
@@ -369,6 +371,18 @@ public sealed class ProfileEditorViewModel : ObservableModel
         foreach (var option in PrimaryMonitorOptions) option.Refresh();
     }
 
+    public void ClearHotKey()
+    {
+        _windowsHotKey = null;
+        HotKeyText = "Set shortcut";
+    }
+
+    public void SetHotKey(WindowsGlobalHotKey hotKey)
+    {
+        _windowsHotKey = hotKey;
+        HotKeyText = hotKey.DisplayText;
+    }
+
     public bool Apply(out string error)
     {
         error = "";
@@ -406,6 +420,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
         Model.SelfPrimaryMonitorId = SelfPrimaryMonitor?.Id ?? "";
         Model.PeerPrimaryMonitorId = PeerPrimaryMonitor?.Id ?? Model.SelfPrimaryMonitorId;
         Model.LayoutPrimaryMonitorId = LayoutPrimaryMonitor?.Id ?? "";
+        Model.WindowsHotKey = _windowsHotKey;
         return true;
     }
 

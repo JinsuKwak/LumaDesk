@@ -21,6 +21,7 @@ public partial class App : System.Windows.Application
     private MainWindow? _settingsWindow;
     private SettingsViewModel? _viewModel;
     private CancellationTokenSource? _displayRefresh;
+    private bool _isRecordingHotKey;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -146,11 +147,25 @@ public partial class App : System.Windows.Application
         try { StartupService.SetEnabled(_settings.LaunchAtLogin); }
         catch (Exception error) { if (_viewModel is not null) _viewModel.Status = error.Message; }
 
+        RegisterHotKeys();
+        _tray?.Rebuild(_settings);
+        _peer?.Start();
+    }
+
+    public void SetHotKeyRecordingActive(bool active)
+    {
+        if (_isRecordingHotKey == active) return;
+        _isRecordingHotKey = active;
+        if (active) _hotKeys.Suspend();
+        else RegisterHotKeys();
+    }
+
+    private void RegisterHotKeys()
+    {
+        if (_isRecordingHotKey) return;
         var failures = _hotKeys.Register(_settings.Profiles, profileID => _ = _executor?.ExecuteAsync(profileID));
         if (failures.Count > 0 && _viewModel is not null)
             _viewModel.Status = $"Shortcuts already in use: {string.Join(", ", failures)}";
-        _tray?.Rebuild(_settings);
-        _peer?.Start();
     }
 
     private void ShowSettings()

@@ -57,10 +57,16 @@ public partial class MainWindow : Window
         if ((sender as FrameworkElement)?.DataContext is not ProfileEditorViewModel profile) return;
         e.Handled = true;
 
+        if (e.Key == Key.Escape)
+        {
+            Keyboard.ClearFocus();
+            return;
+        }
+
         if (e.Key == Key.Back)
         {
-            profile.Model.WindowsHotKey = null;
-            profile.HotKeyText = "Set shortcut";
+            profile.ClearHotKey();
+            Keyboard.ClearFocus();
             return;
         }
 
@@ -79,14 +85,20 @@ public partial class MainWindow : Window
         if (modifiers.HasFlag(ModifierKeys.Windows)) nativeModifiers |= 0x0008;
 
         var label = ShortcutLabel(modifiers, key);
-        profile.Model.WindowsHotKey = new WindowsGlobalHotKey
+        profile.SetHotKey(new WindowsGlobalHotKey
         {
             VirtualKey = (uint)KeyInterop.VirtualKeyFromKey(key),
             Modifiers = nativeModifiers,
             DisplayText = label
-        };
-        profile.HotKeyText = label;
+        });
+        Keyboard.ClearFocus();
     }
+
+    private void ShortcutRecordingStarted(object sender, KeyboardFocusChangedEventArgs e) =>
+        App.CurrentApp.SetHotKeyRecordingActive(true);
+
+    private void ShortcutRecordingEnded(object sender, KeyboardFocusChangedEventArgs e) =>
+        App.CurrentApp.SetHotKeyRecordingActive(false);
 
     private static string ShortcutLabel(ModifierKeys modifiers, Key key)
     {
@@ -102,6 +114,7 @@ public partial class MainWindow : Window
     private void WindowClosing(object? sender, CancelEventArgs e)
     {
         if (App.CurrentApp.IsShuttingDown) return;
+        App.CurrentApp.SetHotKeyRecordingActive(false);
         e.Cancel = true;
         Hide();
     }

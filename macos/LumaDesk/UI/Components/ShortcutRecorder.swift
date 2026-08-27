@@ -4,17 +4,20 @@ import SwiftUI
 
 struct ShortcutRecorder: NSViewRepresentable {
     @Binding var hotKey: MacGlobalHotKey?
+    var onRecordingChanged: (Bool) -> Void = { _ in }
 
     func makeNSView(context: Context) -> ShortcutRecorderButton {
         let button = ShortcutRecorderButton()
         button.onCapture = { captured in
             hotKey = captured
         }
+        button.onRecordingChanged = onRecordingChanged
         return button
     }
 
     func updateNSView(_ nsView: ShortcutRecorderButton, context: Context) {
         nsView.capturedHotKey = hotKey
+        nsView.onRecordingChanged = onRecordingChanged
         nsView.refreshTitle()
     }
 }
@@ -22,6 +25,7 @@ struct ShortcutRecorder: NSViewRepresentable {
 final class ShortcutRecorderButton: NSButton {
     var capturedHotKey: MacGlobalHotKey?
     var onCapture: ((MacGlobalHotKey?) -> Void)?
+    var onRecordingChanged: ((Bool) -> Void)?
     private var isRecording = false
 
     override init(frame frameRect: NSRect) {
@@ -43,15 +47,17 @@ final class ShortcutRecorderButton: NSButton {
     override var acceptsFirstResponder: Bool { true }
 
     @objc private func beginRecording() {
+        guard !isRecording, window?.makeFirstResponder(self) == true else { return }
         isRecording = true
+        onRecordingChanged?(true)
         title = "Press shortcut…"
-        window?.makeFirstResponder(self)
     }
 
     override func resignFirstResponder() -> Bool {
         let didResign = super.resignFirstResponder()
-        if didResign {
+        if didResign, isRecording {
             isRecording = false
+            onRecordingChanged?(false)
             refreshTitle()
         }
         return didResign
