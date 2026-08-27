@@ -141,6 +141,22 @@
                                     </StackPanel>
                                 </Grid>
 
+                                <Border Height="1" Background="{DynamicResource DividerBrush}" Margin="0,15,0,14" />
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Rollback on missing confirmation" FontWeight="SemiBold" />
+                                        <TextBlock Text="Restore the last successfully applied profile if the peer does not confirm the switch."
+                                                   TextWrapping="Wrap" Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" Margin="0,4,18,0" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <CheckBox Content="Enabled" IsChecked="{Binding RollbackOnPeerFailure}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <ComboBox Width="54" ItemsSource="{Binding ConfirmationTimeoutOptions}"
+                                                  SelectedItem="{Binding ConfirmationTimeoutSeconds}" IsEnabled="{Binding RollbackOnPeerFailure}" />
+                                        <TextBlock Text="sec" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" Margin="6,0,0,0" />
+                                    </StackPanel>
+                                </Grid>
+
                                 <Border Height="1" Background="{DynamicResource DividerBrush}" Margin="0,15,0,12" />
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

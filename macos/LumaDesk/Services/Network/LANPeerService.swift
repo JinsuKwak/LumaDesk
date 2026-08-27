@@ -41,6 +41,8 @@ final class LANPeerService {
     }()
     private let decoder = JSONDecoder()
 
+    var rollbackOnPeerFailure: Bool { settings.rollbackOnPeerFailure }
+
     func configure(_ settings: LANPeerSettings) {
         let requiresRestart = self.settings.isEnabled != settings.isEnabled
             || self.settings.commandPort != settings.commandPort
@@ -79,6 +81,15 @@ final class LANPeerService {
             return (false, "Could not encode commit.")
         }
         let response = await send(type: "commit", payload: data, to: peer)
+        return (response.ok, response.detail)
+    }
+
+    func revert(profile: WireProfile) async -> (ok: Bool, detail: String) {
+        guard let peer = bestPeer() else { return (false, "Windows peer is unavailable for rollback.") }
+        guard let data = try? encoder.encode(profile) else {
+            return (false, "Could not encode rollback profile.")
+        }
+        let response = await send(type: "revert", payload: data, to: peer)
         return (response.ok, response.detail)
     }
 
@@ -188,6 +199,15 @@ final class LANPeerService {
             }
             await profileCommittedHandler?(profile)
             return PeerResponse(ok: true, detail: "Applied")
+        case "revert":
+            guard let profile = try? decoder.decode(WireProfile.self, from: payload),
+                  profile.coordinationMode == .managed,
+                  profile.managedTarget == .macOS
+            else {
+                return PeerResponse(ok: false, detail: "Invalid Mac rollback profile.")
+            }
+            await profileCommittedHandler?(profile)
+            return PeerResponse(ok: true, detail: "Reverted")
         default:
             return PeerResponse(ok: false, detail: "Unknown command.")
         }
@@ -308,7 +328,7 @@ final class LANPeerService {
                 }
             }
             connection.start(queue: queue)
-            queue.asyncAfter(deadline: .now() + 3) {
+            queue.asyncAfter(deadline: .now() + .seconds(min(max(settings.confirmationTimeoutSeconds, 2), 15))) {
                 finish(PeerResponse(ok: false, detail: "Peer timed out."))
             }
         }

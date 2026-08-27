@@ -24,6 +24,7 @@ final class DisplaySyncService {
     private var sessions: [String: ManagedDisplaySession] = [:]
     private var lastBuiltInBrightness: Double?
     private var activeProfileID: UUID?
+    private var lastSuccessfulLocalProfileID: UUID?
     private var activeRemoteProfile: DisplaySwitchingProfile?
     private var topologyCooldownUntil = Date.distantPast
 
@@ -383,6 +384,10 @@ final class DisplaySyncService {
             return
         }
 
+        let previousProfile = settings.switchingProfiles.first(where: {
+            $0.id == lastSuccessfulLocalProfileID
+        })
+
         var peerTransactionID: UUID?
         if profile.coordinationMode == .managed {
             let preparation = await peerService.prepare(profile: wireProfile(from: profile))
@@ -398,58 +403,44 @@ final class DisplaySyncService {
         activeRemoteProfile = nil
         applyTopology(profile)
 
-        var attemptedSwitch = false
-        var successfulSwitch = false
+        let inputResult = await switchInputs(for: profile)
 
-        for id in sessions.keys.sorted() {
-            guard !Task.isCancelled else { break }
-            guard var session = sessions[id], session.isConnected, let target = session.target else { continue }
-            guard let inputValue = profileValue(profile.inputAssignments, for: session) else { continue }
-
-            attemptedSwitch = true
-            session.state = .switching
-            session.lastError = nil
-            sessions[id] = session
-            publishSnapshots()
-
-            let configuration = settings.monitorDDCConfigurations[id] ?? .standardDefault
-            let result = await inputSwitchingService.switchInput(on: target, configuration: configuration, value: inputValue)
-
-            session.lastSeen = Date()
-
-            switch result {
-            case .alreadySelected:
-                session.state = .away
-                session.lastError = nil
-                successfulSwitch = true
-            case .sent:
-                session.state = .sent
-                session.lastError = nil
-                successfulSwitch = true
-            case .failed:
-                session.state = .error("Input failed")
-                session.lastError = "Input failed"
-            }
-
-            sessions[id] = session
-            publishSnapshots()
-        }
-
-        if successfulSwitch {
+        if inputResult.successful {
             statusHandler?(profile.coordinationMode == .external
                 ? "\(profile.name) sent · unverified"
                 : "\(profile.name) sent")
-        } else if attemptedSwitch {
+        } else if inputResult.attempted {
             statusHandler?("\(profile.name) failed")
         } else {
             statusHandler?("No monitors in \(profile.name)")
         }
 
-        if let peerTransactionID, successfulSwitch || !attemptedSwitch {
+        var peerConfirmed = profile.coordinationMode == .external
+        if let peerTransactionID, inputResult.successful || !inputResult.attempted {
             let commit = await peerService.commit(transactionID: peerTransactionID)
             if !commit.ok {
-                statusHandler?("\(profile.name): \(commit.detail)")
+                if peerService.rollbackOnPeerFailure, let previousProfile {
+                    var rollbackErrors = await restorePreviousProfile(previousProfile)
+                    if previousProfile.coordinationMode == .managed {
+                        let peerRollback = await peerService.revert(profile: wireProfile(from: previousProfile))
+                        if !peerRollback.ok { rollbackErrors.append("Peer rollback: \(peerRollback.detail)") }
+                    }
+                    lastSuccessfulLocalProfileID = previousProfile.id
+                    statusHandler?(rollbackErrors.isEmpty
+                        ? "\(profile.name): peer did not confirm · restored \(previousProfile.name)"
+                        : "\(profile.name): peer did not confirm · rollback incomplete: \(rollbackErrors.joined(separator: " · "))")
+                } else if peerService.rollbackOnPeerFailure {
+                    statusHandler?("\(profile.name): \(commit.detail) No previous successful profile is available to restore.")
+                } else {
+                    statusHandler?("\(profile.name): \(commit.detail)")
+                }
+            } else {
+                peerConfirmed = true
             }
+        }
+
+        if peerConfirmed, inputResult.failures.isEmpty {
+            lastSuccessfulLocalProfileID = profile.id
         }
 
         switchAwayInFlight = false
@@ -458,6 +449,62 @@ final class DisplaySyncService {
             pendingRescan = false
             requestRescan(delay: 1)
         }
+    }
+
+    private func switchInputs(
+        for profile: DisplaySwitchingProfile
+    ) async -> (attempted: Bool, successful: Bool, failures: [String]) {
+        var attempted = false
+        var successful = false
+        var failures: [String] = []
+
+        for id in sessions.keys.sorted() {
+            guard !Task.isCancelled else { break }
+            guard var session = sessions[id], session.isConnected, let target = session.target else { continue }
+            guard let inputValue = profileValue(profile.inputAssignments, for: session) else { continue }
+
+            attempted = true
+            session.state = .switching
+            session.lastError = nil
+            sessions[id] = session
+            publishSnapshots()
+
+            let configuration = settings.monitorDDCConfigurations[id] ?? .standardDefault
+            let result = await inputSwitchingService.switchInput(
+                on: target,
+                configuration: configuration,
+                value: inputValue
+            )
+
+            session.lastSeen = Date()
+            switch result {
+            case .alreadySelected:
+                session.state = .away
+                session.lastError = nil
+                successful = true
+            case .sent:
+                session.state = .sent
+                session.lastError = nil
+                successful = true
+            case .failed:
+                session.state = .error("Input failed")
+                session.lastError = "Input failed"
+                failures.append("\(session.name): input failed")
+            }
+
+            sessions[id] = session
+            publishSnapshots()
+        }
+
+        return (attempted, successful, failures)
+    }
+
+    private func restorePreviousProfile(_ profile: DisplaySwitchingProfile) async -> [String] {
+        activeProfileID = profile.id
+        activeRemoteProfile = nil
+        applyTopology(profile)
+        let result = await switchInputs(for: profile)
+        return result.failures
     }
 
     private func applyActiveTopology() {
@@ -539,6 +586,7 @@ final class DisplaySyncService {
         }
 
         activeProfileID = nil
+        lastSuccessfulLocalProfileID = nil
         activeRemoteProfile = profile
         applyTopology(profile)
         statusHandler?("\(profile.name) applied")

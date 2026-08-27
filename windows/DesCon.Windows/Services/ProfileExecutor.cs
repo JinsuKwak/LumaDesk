@@ -9,6 +9,7 @@ public sealed class ProfileExecutor
     private readonly Func<AppSettings> _settings;
     private readonly LanPeerService _peer;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private Guid? _lastSuccessfulLocalProfileID;
 
     public event Action<string>? StatusChanged;
 
@@ -38,12 +39,9 @@ public sealed class ProfileExecutor
                 .SelectMany(item => new[] { (Key: item.Id, Monitor: item), (Key: item.ProfileStorageKey, Monitor: item) })
                 .GroupBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(item => item.Key, item => item.First().Monitor, StringComparer.OrdinalIgnoreCase);
-            var windowsActions = profile.WindowsDisplayBehaviors
-                .Where(item => monitors.ContainsKey(item.Key))
-                .Select(item => (Monitor: monitors[item.Key], Behavior: item.Value))
-                .GroupBy(item => item.Monitor.Id, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.Last())
-                .ToList();
+            var previousProfile = settings.Profiles.FirstOrDefault(item =>
+                item.Id == _lastSuccessfulLocalProfileID);
+            var windowsActions = ResolveWindowsActions(profile, monitors);
             var errors = new List<string>();
             Guid? transactionID = null;
 
@@ -77,13 +75,40 @@ public sealed class ProfileExecutor
             if (transactionID is { } preparedTransaction)
             {
                 var commit = await _peer.CommitAsync(preparedTransaction);
-                if (!commit.Ok) errors.Add(commit.Detail);
+                if (!commit.Ok)
+                {
+                    if (settings.Network.RollbackOnPeerFailure && previousProfile is not null)
+                    {
+                        var rollbackErrors = await RestorePreviousProfileAsync(previousProfile, monitors);
+                        if (previousProfile.CoordinationMode == ProfileCoordinationMode.Managed)
+                        {
+                            var peerRollback = await _peer.RevertAsync(previousProfile);
+                            if (!peerRollback.Ok) rollbackErrors.Add($"Peer rollback: {peerRollback.Detail}");
+                        }
+
+                        _lastSuccessfulLocalProfileID = previousProfile.Id;
+                        StatusChanged?.Invoke(rollbackErrors.Count == 0
+                            ? $"{profile.Name}: peer did not confirm · restored {previousProfile.Name}"
+                            : $"{profile.Name}: peer did not confirm · rollback incomplete: {string.Join(" · ", rollbackErrors.Distinct())}");
+                        return;
+                    }
+
+                    if (settings.Network.RollbackOnPeerFailure)
+                    {
+                        StatusChanged?.Invoke($"{profile.Name}: {commit.Detail} No previous successful profile is available to restore.");
+                        return;
+                    }
+
+                    errors.Add(commit.Detail);
+                }
             }
 
             // Keep the Windows path available long enough for DDC to work, then
             // detach displays handed to another computer and verify that the
             // desktop space really disappeared.
             await ApplyDisabledBehaviorsAsync(windowsActions, errors);
+
+            if (errors.Count == 0) _lastSuccessfulLocalProfileID = profile.Id;
 
             if (errors.Count > 0)
                 StatusChanged?.Invoke($"{profile.Name}: {string.Join(" · ", errors.Distinct())}");
@@ -120,6 +145,8 @@ public sealed class ProfileExecutor
             ApplyActiveBehaviors(windowsActions, errors);
             await ApplyDisabledBehaviorsAsync(windowsActions, errors);
 
+            if (errors.Count == 0) _lastSuccessfulLocalProfileID = null;
+
             StatusChanged?.Invoke(errors.Count == 0
                 ? $"{wireProfile.Name} applied"
                 : $"{wireProfile.Name}: {string.Join(" · ", errors.Distinct())}");
@@ -128,6 +155,38 @@ public sealed class ProfileExecutor
         {
             _gate.Release();
         }
+    }
+
+    private static List<(MonitorDefinition Monitor, WindowsDisplayBehavior Behavior)> ResolveWindowsActions(
+        SwitchingProfile profile,
+        IReadOnlyDictionary<string, MonitorDefinition> monitors)
+    {
+        return profile.WindowsDisplayBehaviors
+            .Where(item => monitors.ContainsKey(item.Key))
+            .Select(item => (Monitor: monitors[item.Key], Behavior: item.Value))
+            .GroupBy(item => item.Monitor.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Last())
+            .ToList();
+    }
+
+    private async Task<List<string>> RestorePreviousProfileAsync(
+        SwitchingProfile profile,
+        IReadOnlyDictionary<string, MonitorDefinition> monitors)
+    {
+        var errors = new List<string>();
+        var actions = ResolveWindowsActions(profile, monitors);
+        ApplyActiveBehaviors(actions, errors);
+
+        foreach (var (monitorID, value) in profile.InputAssignments)
+        {
+            if (!monitors.TryGetValue(monitorID, out var monitor)) continue;
+            var result = await _ddc.SetInputAsync(monitor, value);
+            if (!result.Success) errors.Add($"{monitor.Name}: {result.Detail}");
+        }
+
+        await Task.Delay(600);
+        await ApplyDisabledBehaviorsAsync(actions, errors);
+        return errors;
     }
 
     private void ApplyActiveBehaviors(

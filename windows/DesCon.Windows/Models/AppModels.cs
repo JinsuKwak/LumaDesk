@@ -65,6 +65,8 @@ public sealed class NetworkSettings
     public string DeviceName { get; set; } = Environment.MachineName;
     public string SharedKey { get; set; } = "";
     public int CommandPort { get; set; } = 47831;
+    public bool RollbackOnPeerFailure { get; set; } = true;
+    public int ConfirmationTimeoutSeconds { get; set; } = 5;
 }
 
 public sealed class AppSettings

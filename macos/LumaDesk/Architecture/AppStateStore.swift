@@ -177,6 +177,18 @@ final class AppStateStore: ObservableObject {
         lanPeerService.configure(preferences.lanPeer)
     }
 
+    func setLANRollbackOnPeerFailure(_ enabled: Bool) {
+        preferences.lanPeer.rollbackOnPeerFailure = enabled
+        persist()
+        lanPeerService.configure(preferences.lanPeer)
+    }
+
+    func setLANConfirmationTimeout(_ seconds: Int) {
+        preferences.lanPeer.confirmationTimeoutSeconds = min(max(seconds, 2), 15)
+        persist()
+        lanPeerService.configure(preferences.lanPeer)
+    }
+
     func rescanLANPeers() {
         lanPeerService.rescan()
     }

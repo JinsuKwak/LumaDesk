@@ -92,6 +92,16 @@ public sealed class LanPeerService : IDisposable
         return await Send(peer, "commit", payload, cancellationToken);
     }
 
+    public async Task<(bool Ok, string Detail)> RevertAsync(SwitchingProfile profile)
+    {
+        var peer = BestPeer();
+        if (peer is null) return (false, "Mac peer is unavailable for rollback.");
+        var wireProfile = WireProfile.From(profile, _settings().Monitors);
+        var payload = JsonSerializer.SerializeToUtf8Bytes(wireProfile, _json);
+        var cancellationToken = _sessionStop?.Token ?? CancellationToken.None;
+        return await Send(peer, "revert", payload, cancellationToken);
+    }
+
     public void Rescan()
     {
         if (!_settings().Network.Enabled)
@@ -187,6 +197,14 @@ public sealed class LanPeerService : IDisposable
                         return new PeerResponse(false, "Unknown or expired transaction.");
                     if (ProfileCommitted is not null) await ProfileCommitted(profile);
                     return new PeerResponse(true, "Applied");
+                case "revert":
+                    var previousProfile = JsonSerializer.Deserialize<WireProfile>(payload, _json);
+                    if (previousProfile is null ||
+                        previousProfile.CoordinationMode != ProfileCoordinationMode.Managed ||
+                        previousProfile.ManagedTarget != ManagedProfileTarget.Windows)
+                        return new PeerResponse(false, "Invalid Windows rollback profile.");
+                    if (ProfileCommitted is not null) await ProfileCommitted(previousProfile);
+                    return new PeerResponse(true, "Reverted");
                 default:
                     return new PeerResponse(false, "Unknown command.");
             }
@@ -203,7 +221,10 @@ public sealed class LanPeerService : IDisposable
         {
             using var client = new TcpClient();
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(
+                _settings().Network.ConfirmationTimeoutSeconds,
+                2,
+                15)));
             await client.ConnectAsync(peer.Address, peer.CommandPort, timeout.Token);
             await using var stream = client.GetStream();
             using var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true);
@@ -215,6 +236,10 @@ public sealed class LanPeerService : IDisposable
                 return (false, "Invalid peer response.");
             var response = JsonSerializer.Deserialize<PeerResponse>(Convert.FromBase64String(responseEnvelope.Payload), _json);
             return response is null ? (false, "Empty peer response.") : (response.Ok, response.Detail);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (false, "Peer timed out.");
         }
         catch (Exception error)
         {

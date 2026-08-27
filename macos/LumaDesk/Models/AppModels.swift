@@ -851,6 +851,32 @@ struct LANPeerSettings: Codable, Equatable {
     var deviceName: String = Host.current().localizedName ?? "Mac"
     var sharedKey: String = ""
     var commandPort: UInt16 = 47_831
+    var rollbackOnPeerFailure: Bool = true
+    var confirmationTimeoutSeconds: Int = 5
+
+    enum CodingKeys: String, CodingKey {
+        case isEnabled
+        case deviceName
+        case sharedKey
+        case commandPort
+        case rollbackOnPeerFailure
+        case confirmationTimeoutSeconds
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName) ?? (Host.current().localizedName ?? "Mac")
+        sharedKey = try container.decodeIfPresent(String.self, forKey: .sharedKey) ?? ""
+        commandPort = try container.decodeIfPresent(UInt16.self, forKey: .commandPort) ?? 47_831
+        rollbackOnPeerFailure = try container.decodeIfPresent(Bool.self, forKey: .rollbackOnPeerFailure) ?? true
+        confirmationTimeoutSeconds = min(max(
+            try container.decodeIfPresent(Int.self, forKey: .confirmationTimeoutSeconds) ?? 5,
+            2
+        ), 15)
+    }
 }
 
 struct AppPreferences: Codable, Equatable {

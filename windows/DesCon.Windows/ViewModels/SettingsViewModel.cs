@@ -228,6 +228,8 @@ public sealed class SettingsViewModel : ObservableModel
     private bool _networkEnabled;
     private string _deviceName;
     private string _sharedKey;
+    private bool _rollbackOnPeerFailure;
+    private int _confirmationTimeoutSeconds;
     private string _status = "Ready";
 
     public SettingsViewModel(AppSettings settings, SettingsStore store, Action afterSave, Action rescanPeers)
@@ -241,6 +243,8 @@ public sealed class SettingsViewModel : ObservableModel
         _networkEnabled = settings.Network.Enabled;
         _deviceName = settings.Network.DeviceName;
         _sharedKey = settings.Network.SharedKey;
+        _rollbackOnPeerFailure = settings.Network.RollbackOnPeerFailure;
+        _confirmationTimeoutSeconds = Math.Clamp(settings.Network.ConfirmationTimeoutSeconds, 2, 15);
         Monitors = new ObservableCollection<MonitorEditorViewModel>(settings.Monitors.Select(item => new MonitorEditorViewModel(item)));
         Profiles = new ObservableCollection<ProfileEditorViewModel>(settings.Profiles.Select(item => new ProfileEditorViewModel(item, settings.Monitors, settings.FavoriteProfileId)));
     }
@@ -262,6 +266,9 @@ public sealed class SettingsViewModel : ObservableModel
     }
     public bool IsSharedKeyValid => SharedKey.Trim().Length >= 8;
     public bool IsSharedKeyDirty => !string.Equals(SharedKey.Trim(), _settings.Network.SharedKey, StringComparison.Ordinal);
+    public bool RollbackOnPeerFailure { get => _rollbackOnPeerFailure; set => Set(ref _rollbackOnPeerFailure, value); }
+    public int ConfirmationTimeoutSeconds { get => _confirmationTimeoutSeconds; set => Set(ref _confirmationTimeoutSeconds, value); }
+    public IReadOnlyList<int> ConfirmationTimeoutOptions { get; } = Enumerable.Range(2, 14).ToArray();
     public string Status { get => _status; set => Set(ref _status, value); }
     public ObservableCollection<MonitorEditorViewModel> Monitors { get; }
     public ObservableCollection<ProfileEditorViewModel> Profiles { get; }
@@ -384,5 +391,7 @@ public sealed class SettingsViewModel : ObservableModel
         _settings.Network.Enabled = NetworkEnabled;
         _settings.Network.DeviceName = string.IsNullOrWhiteSpace(DeviceName) ? Environment.MachineName : DeviceName.Trim();
         _settings.Network.SharedKey = SharedKey.Trim();
+        _settings.Network.RollbackOnPeerFailure = RollbackOnPeerFailure;
+        _settings.Network.ConfirmationTimeoutSeconds = Math.Clamp(ConfirmationTimeoutSeconds, 2, 15);
     }
 }

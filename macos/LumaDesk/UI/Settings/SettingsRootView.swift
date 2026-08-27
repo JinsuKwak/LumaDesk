@@ -203,7 +203,29 @@ struct SettingsRootView: View {
                     }
                 }
 
-                Text("Enter the exact same key in the Windows app. Peers are discovered at launch, on demand, or with Rescan; there is no periodic background broadcast.")
+                Toggle(
+                    "Rollback on missing confirmation",
+                    isOn: Binding(
+                        get: { appState.preferences.lanPeer.rollbackOnPeerFailure },
+                        set: appState.setLANRollbackOnPeerFailure
+                    )
+                )
+
+                if appState.preferences.lanPeer.rollbackOnPeerFailure {
+                    LabeledContent("Confirmation timeout") {
+                        Stepper(
+                            "\(appState.preferences.lanPeer.confirmationTimeoutSeconds) sec",
+                            value: Binding(
+                                get: { appState.preferences.lanPeer.confirmationTimeoutSeconds },
+                                set: appState.setLANConfirmationTimeout
+                            ),
+                            in: 2 ... 15
+                        )
+                        .frame(width: 150)
+                    }
+                }
+
+                Text("Enter the exact same key in the Windows app. Rollback restores the last successfully applied profile; peers are discovered at launch or with Rescan, with no periodic background broadcast.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
