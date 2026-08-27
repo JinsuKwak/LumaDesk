@@ -18,6 +18,14 @@ Managed profile activation is a two-phase transaction:
 4. `commit` tells the destination to apply its pending topology after the display
    reconfiguration event.
 
+`self` (`This Device`) profiles carry two explicit anchors. `selfPrimaryMonitorID`
+becomes Primary on the computer which launches the profile and its other assigned
+monitors become Extended. `peerPrimaryMonitorID` remains the peer's recoverable
+Primary while the peer hands off/disables the other assigned paths. This avoids an
+invalid zero-display Windows topology and also keeps a Mac mini recoverable when it
+has no built-in display. A later profile which assigns Primary/Extended restores
+those paths after DDC with bounded retries; there is no steady-state topology poll.
+
 Monitor actions use a per-monitor network identity. A user-defined Pairing ID
 is normalized case-insensitively and sent as `PAIR:<id>`; when it is empty, the
 clients fall back to the monitor's EDID-derived shared identity. Display numbers

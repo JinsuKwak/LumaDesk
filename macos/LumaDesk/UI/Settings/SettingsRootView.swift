@@ -689,7 +689,12 @@ struct SettingsRootView: View {
                             )
                             unlockedDDCDisplays.removeAll()
                         }
-                        .disabled(!hasUnsavedDisplaySwitchChanges || !areProfileNamesValid || !arePairingIDsValid)
+                        .disabled(
+                            !hasUnsavedDisplaySwitchChanges ||
+                                !areProfileNamesValid ||
+                                !arePairingIDsValid ||
+                                !areSelfPrimarySelectionsValid
+                        )
                     }
                     .padding(.top, 4)
 
@@ -719,6 +724,12 @@ struct SettingsRootView: View {
 
                 if !areProfileNamesValid {
                     Text("Profile names must be unique and cannot be empty.")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                if !areSelfPrimarySelectionsValid {
+                    Text("This Device primaries must both be enabled monitors.")
                         .font(.footnote)
                         .foregroundStyle(.red)
                 }
@@ -1039,6 +1050,12 @@ struct SettingsRootView: View {
                let value = switchingProfileDrafts[index].windowsDisplayBehaviors.removeValue(forKey: oldKey) {
                 switchingProfileDrafts[index].windowsDisplayBehaviors[newKey] = value
             }
+            if switchingProfileDrafts[index].selfPrimaryMonitorID.caseInsensitiveCompare(oldKey) == .orderedSame {
+                switchingProfileDrafts[index].selfPrimaryMonitorID = newKey
+            }
+            if switchingProfileDrafts[index].peerPrimaryMonitorID.caseInsensitiveCompare(oldKey) == .orderedSame {
+                switchingProfileDrafts[index].peerPrimaryMonitorID = newKey
+            }
         }
     }
 
@@ -1108,6 +1125,11 @@ struct SettingsRootView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                } else if switchingProfileDrafts[index].coordinationMode == .thisDevice {
+                    Text("All assigned monitors → this Mac")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 } else {
                     Text("One-way DDC")
                         .font(.caption)
@@ -1128,6 +1150,62 @@ struct SettingsRootView: View {
                 .frame(width: 122, height: 22)
             }
             .padding(.leading, 25)
+
+            if switchingProfileDrafts[index].coordinationMode == .thisDevice {
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 7) {
+                        Text("This Mac primary")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 92, alignment: .trailing)
+
+                        Picker("", selection: Binding(
+                            get: { switchingProfileDrafts[index].selfPrimaryMonitorID },
+                            set: { switchingProfileDrafts[index].selfPrimaryMonitorID = $0 }
+                        )) {
+                            Text("Choose").tag("")
+                            ForEach(appState.displaySyncSnapshots) { snapshot in
+                                Text(displayLabel(for: snapshot)).tag(profileStorageKey(for: snapshot))
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .frame(width: 170)
+
+                        Spacer(minLength: 8)
+                    }
+
+                    HStack(spacing: 7) {
+                        Text("Peer fallback")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 92, alignment: .trailing)
+
+                        Picker("", selection: Binding(
+                            get: { switchingProfileDrafts[index].peerPrimaryMonitorID },
+                            set: { switchingProfileDrafts[index].peerPrimaryMonitorID = $0 }
+                        )) {
+                            Text("Choose").tag("")
+                            ForEach(appState.displaySyncSnapshots) { snapshot in
+                                Text(displayLabel(for: snapshot)).tag(profileStorageKey(for: snapshot))
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .controlSize(.small)
+                        .frame(width: 170)
+
+                        Text("Keeps one recoverable peer desktop path.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        Spacer(minLength: 8)
+                    }
+                }
+                .padding(.leading, 25)
+            }
 
             ForEach(appState.displaySyncSnapshots) { snapshot in
                 let profileKey = profileStorageKey(for: snapshot)
@@ -1158,34 +1236,44 @@ struct SettingsRootView: View {
                         .opacity(switchingProfileDrafts[index].inputAssignments[profileKey] == nil ? 0.45 : 1)
                     }
 
-                    HStack(alignment: .center, spacing: 12) {
-                        Text("Display behavior")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-
-                        Spacer(minLength: 8)
-
-                        Picker("This Mac", selection: macBehaviorBinding(profileIndex: index, displayID: profileKey)) {
-                            ForEach(MacDisplayBehavior.allCases) { behavior in
-                                Text(behavior.title).tag(behavior)
-                            }
+                    if switchingProfileDrafts[index].coordinationMode == .thisDevice {
+                        HStack {
+                            Text("This Mac uses Primary/Extended · the peer keeps its fallback Primary and hands off the rest")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 8)
                         }
-                        .pickerStyle(.menu)
-                        .controlSize(.small)
-                        .frame(width: 150)
+                        .padding(.leading, 25)
+                    } else {
+                        HStack(alignment: .center, spacing: 12) {
+                            Text("Display behavior")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
 
-                        if switchingProfileDrafts[index].coordinationMode == .managed {
-                            Picker("Windows", selection: windowsBehaviorBinding(profileIndex: index, displayID: profileKey)) {
-                                ForEach(WindowsDisplayBehavior.allCases) { behavior in
+                            Spacer(minLength: 8)
+
+                            Picker("This Mac", selection: macBehaviorBinding(profileIndex: index, displayID: profileKey)) {
+                                ForEach(MacDisplayBehavior.allCases) { behavior in
                                     Text(behavior.title).tag(behavior)
                                 }
                             }
                             .pickerStyle(.menu)
                             .controlSize(.small)
-                            .frame(width: 160)
+                            .frame(width: 150)
+
+                            if switchingProfileDrafts[index].coordinationMode == .managed {
+                                Picker("Windows", selection: windowsBehaviorBinding(profileIndex: index, displayID: profileKey)) {
+                                    ForEach(WindowsDisplayBehavior.allCases) { behavior in
+                                        Text(behavior.title).tag(behavior)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .controlSize(.small)
+                                .frame(width: 160)
+                            }
                         }
+                        .padding(.leading, 25)
                     }
-                    .padding(.leading, 25)
                 }
                 .padding(.leading, 14)
                 .padding(.vertical, 3)
@@ -1197,6 +1285,21 @@ struct SettingsRootView: View {
     private var areProfileNamesValid: Bool {
         let names = switchingProfileDrafts.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
         return !names.contains(where: \.isEmpty) && Set(names).count == names.count
+    }
+
+    private var areSelfPrimarySelectionsValid: Bool {
+        switchingProfileDrafts.allSatisfy { profile in
+            guard profile.coordinationMode == .thisDevice,
+                  !profile.inputAssignments.isEmpty
+            else { return true }
+            let selfPrimaryIsIncluded = profile.inputAssignments.keys.contains {
+                $0.caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame
+            }
+            let peerPrimaryIsIncluded = profile.inputAssignments.keys.contains {
+                $0.caseInsensitiveCompare(profile.peerPrimaryMonitorID) == .orderedSame
+            }
+            return selfPrimaryIsIncluded && peerPrimaryIsIncluded
+        }
     }
 
     private func addSwitchingProfile() {
@@ -1221,8 +1324,24 @@ struct SettingsRootView: View {
             set: { enabled in
                 if enabled {
                     switchingProfileDrafts[profileIndex].inputAssignments[displayID] = DisplayInputSource.displayPort1.rawValue
+                    if switchingProfileDrafts[profileIndex].coordinationMode == .thisDevice,
+                       switchingProfileDrafts[profileIndex].selfPrimaryMonitorID.isEmpty {
+                        switchingProfileDrafts[profileIndex].selfPrimaryMonitorID = displayID
+                    }
+                    if switchingProfileDrafts[profileIndex].coordinationMode == .thisDevice,
+                       switchingProfileDrafts[profileIndex].peerPrimaryMonitorID.isEmpty {
+                        switchingProfileDrafts[profileIndex].peerPrimaryMonitorID = displayID
+                    }
                 } else {
                     switchingProfileDrafts[profileIndex].inputAssignments.removeValue(forKey: displayID)
+                    if switchingProfileDrafts[profileIndex].selfPrimaryMonitorID.caseInsensitiveCompare(displayID) == .orderedSame {
+                        switchingProfileDrafts[profileIndex].selfPrimaryMonitorID = switchingProfileDrafts[profileIndex]
+                            .inputAssignments.keys.sorted().first ?? ""
+                    }
+                    if switchingProfileDrafts[profileIndex].peerPrimaryMonitorID.caseInsensitiveCompare(displayID) == .orderedSame {
+                        switchingProfileDrafts[profileIndex].peerPrimaryMonitorID = switchingProfileDrafts[profileIndex]
+                            .inputAssignments.keys.sorted().first ?? ""
+                    }
                 }
             }
         )

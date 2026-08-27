@@ -186,7 +186,7 @@ public sealed class LanPeerService : IDisposable
                 case "prepare":
                     var prepare = JsonSerializer.Deserialize<PreparePayload>(payload, _json);
                     if (prepare is null) return new PeerResponse(false, "Invalid profile payload.");
-                    if (prepare.Profile.CoordinationMode != ProfileCoordinationMode.Managed ||
+                    if (!RequiresPeer(prepare.Profile.CoordinationMode) ||
                         prepare.Profile.ManagedTarget != ManagedProfileTarget.Windows)
                         return new PeerResponse(false, "This profile does not target Windows.");
                     _pending[prepare.TransactionID] = prepare.Profile;
@@ -200,7 +200,7 @@ public sealed class LanPeerService : IDisposable
                 case "revert":
                     var previousProfile = JsonSerializer.Deserialize<WireProfile>(payload, _json);
                     if (previousProfile is null ||
-                        previousProfile.CoordinationMode != ProfileCoordinationMode.Managed ||
+                        !RequiresPeer(previousProfile.CoordinationMode) ||
                         previousProfile.ManagedTarget != ManagedProfileTarget.Windows)
                         return new PeerResponse(false, "Invalid Windows rollback profile.");
                     if (ProfileCommitted is not null) await ProfileCommitted(previousProfile);
@@ -420,6 +420,9 @@ public sealed class LanPeerService : IDisposable
         return Convert.ToHexString(HMACSHA256.HashData(key, Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
+    private static bool RequiresPeer(ProfileCoordinationMode mode) =>
+        mode is ProfileCoordinationMode.Managed or ProfileCoordinationMode.Self;
+
     private sealed record Peer(Guid ID, string DeviceName, IPAddress Address, int CommandPort, DateTimeOffset LastSeen);
     private sealed record DiscoveryAnnouncement(int Version, Guid InstanceID, string DeviceName, string Platform, int CommandPort, string? Kind);
     private sealed record Envelope(int Version, Guid ID, long Timestamp, string Nonce, string Type, string Payload, string Signature);
@@ -443,6 +446,38 @@ public sealed record WireProfile(
 {
     public static WireProfile From(SwitchingProfile profile, IReadOnlyCollection<MonitorDefinition> monitors)
     {
+        if (profile.CoordinationMode == ProfileCoordinationMode.Self)
+        {
+            var included = monitors
+                .Select(monitor => new
+                {
+                    Monitor = monitor,
+                    Input = profile.InputAssignments.TryGetValue(monitor.ProfileStorageKey, out var value) ||
+                            profile.InputAssignments.TryGetValue(monitor.Id, out value)
+                        ? value
+                        : (ushort?)null
+                })
+                .Where(item => item.Input is not null)
+                .OrderBy(item => item.Monitor.DisplayNumber)
+                .ToList();
+            var selfPrimary = included.FirstOrDefault(item =>
+                    string.Equals(item.Monitor.ProfileStorageKey, profile.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Monitor.Id, profile.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase))
+                ?? included.FirstOrDefault();
+            var peerPrimary = included.FirstOrDefault(item =>
+                    string.Equals(item.Monitor.ProfileStorageKey, profile.PeerPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(item.Monitor.Id, profile.PeerPrimaryMonitorId, StringComparison.OrdinalIgnoreCase))
+                ?? selfPrimary;
+            var selfActions = included
+                .Select(item => new WireMonitorAction(
+                    item.Monitor.NetworkIdentity,
+                    item.Input,
+                    item == peerPrimary ? MacDisplayBehavior.Primary : MacDisplayBehavior.HandedOff,
+                    item == selfPrimary ? WindowsDisplayBehavior.Primary : WindowsDisplayBehavior.Extended))
+                .ToList();
+            return new WireProfile(profile.Id, profile.Name, profile.CoordinationMode, ManagedProfileTarget.MacOS, selfActions);
+        }
+
         var actions = new List<WireMonitorAction>();
         foreach (var monitor in monitors)
         {

@@ -630,6 +630,7 @@ struct MonitorDDCConfiguration: Codable, Equatable {
 
 enum ProfileCoordinationMode: String, Codable, CaseIterable, Identifiable {
     case managed
+    case thisDevice = "self"
     case external
 
     var id: String { rawValue }
@@ -637,6 +638,7 @@ enum ProfileCoordinationMode: String, Codable, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .managed: "Mac + Windows"
+        case .thisDevice: "This Device"
         case .external: "External device"
         }
     }
@@ -719,6 +721,8 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
     var id: UUID = UUID()
     var name: String
     var coordinationMode: ProfileCoordinationMode = .managed
+    var selfPrimaryMonitorID: String = ""
+    var peerPrimaryMonitorID: String = ""
     var inputAssignments: [String: UInt16] = [:]
     var macDisplayBehaviors: [String: MacDisplayBehavior] = [:]
     var windowsDisplayBehaviors: [String: WindowsDisplayBehavior] = [:]
@@ -729,6 +733,8 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         case id
         case name
         case coordinationMode
+        case selfPrimaryMonitorID
+        case peerPrimaryMonitorID
         case inputAssignments
         case macDisplayBehaviors
         case windowsDisplayBehaviors
@@ -740,6 +746,8 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         id: UUID = UUID(),
         name: String,
         coordinationMode: ProfileCoordinationMode = .managed,
+        selfPrimaryMonitorID: String = "",
+        peerPrimaryMonitorID: String = "",
         inputAssignments: [String: UInt16] = [:],
         macDisplayBehaviors: [String: MacDisplayBehavior] = [:],
         windowsDisplayBehaviors: [String: WindowsDisplayBehavior] = [:],
@@ -749,6 +757,8 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         self.id = id
         self.name = name
         self.coordinationMode = coordinationMode
+        self.selfPrimaryMonitorID = selfPrimaryMonitorID
+        self.peerPrimaryMonitorID = peerPrimaryMonitorID
         self.inputAssignments = inputAssignments
         self.macDisplayBehaviors = macDisplayBehaviors
         self.windowsDisplayBehaviors = windowsDisplayBehaviors
@@ -763,6 +773,9 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         // Existing profiles were intentionally one-way. Preserve that behavior
         // until the user explicitly opts a profile into Mac + Windows handshakes.
         coordinationMode = try container.decodeIfPresent(ProfileCoordinationMode.self, forKey: .coordinationMode) ?? .external
+        selfPrimaryMonitorID = try container.decodeIfPresent(String.self, forKey: .selfPrimaryMonitorID) ?? ""
+        peerPrimaryMonitorID = try container.decodeIfPresent(String.self, forKey: .peerPrimaryMonitorID)
+            ?? selfPrimaryMonitorID
         inputAssignments = try container.decodeIfPresent([String: UInt16].self, forKey: .inputAssignments) ?? [:]
         macDisplayBehaviors = try container.decodeIfPresent([String: MacDisplayBehavior].self, forKey: .macDisplayBehaviors) ?? [:]
         windowsDisplayBehaviors = try container.decodeIfPresent([String: WindowsDisplayBehavior].self, forKey: .windowsDisplayBehaviors) ?? [:]

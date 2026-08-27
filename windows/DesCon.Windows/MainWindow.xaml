@@ -1,6 +1,7 @@
 <Window x:Class="DesCon.Windows.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:models="clr-namespace:DesCon.Windows.Models"
         xmlns:viewModels="clr-namespace:DesCon.Windows.ViewModels"
         Title="LumaDesk Settings" Width="1040" Height="760" MinWidth="920" MinHeight="650"
         WindowStartupLocation="CenterScreen" Background="{DynamicResource WindowBrush}" Icon="Resources/DesCon.ico">
@@ -297,9 +298,65 @@
                                             <Grid Margin="38,8,0,7">
                                                 <Grid.ColumnDefinitions><ColumnDefinition Width="160" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                                 <ComboBox ItemsSource="{Binding CoordinationModes}" SelectedItem="{Binding CoordinationMode}"
-                                                          Padding="6,2" MinHeight="26" />
-                                                <TextBlock Grid.Column="1" Text="{Binding DirectionLabel}" Margin="12,0,0,0" VerticalAlignment="Center"
+                                                          Padding="6,2" MinHeight="26">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock>
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Text" Value="{Binding}" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding}" Value="{x:Static models:ProfileCoordinationMode.Managed}">
+                                                                                <Setter Property="Text" Value="Mac + Windows" />
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding}" Value="{x:Static models:ProfileCoordinationMode.Self}">
+                                                                                <Setter Property="Text" Value="This Device" />
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding}" Value="{x:Static models:ProfileCoordinationMode.External}">
+                                                                                <Setter Property="Text" Value="External device" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding DirectionLabel}" VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                                                </StackPanel>
+                                            </Grid>
+
+                                            <Grid Margin="38,0,0,8">
+                                                <Grid.Style>
+                                                    <Style TargetType="Grid">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSelf}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Grid.Style>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="145" />
+                                                    <ColumnDefinition Width="22" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="145" />
+                                                    <ColumnDefinition Width="*" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="This PC primary" VerticalAlignment="Center" Margin="0,0,7,0"
                                                            Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                                                <ComboBox Grid.Column="1" ItemsSource="{Binding PrimaryMonitorOptions}"
+                                                          SelectedItem="{Binding SelfPrimaryMonitor}" DisplayMemberPath="Label"
+                                                          Padding="6,1" MinHeight="25" />
+                                                <TextBlock Grid.Column="3" Text="Peer fallback" VerticalAlignment="Center" Margin="0,0,7,0"
+                                                           Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                                                <ComboBox Grid.Column="4" ItemsSource="{Binding PrimaryMonitorOptions}"
+                                                          SelectedItem="{Binding PeerPrimaryMonitor}" DisplayMemberPath="Label"
+                                                          Padding="6,1" MinHeight="25" />
                                             </Grid>
 
                                             <ItemsControl ItemsSource="{Binding Monitors}" Margin="38,0,0,0">
@@ -322,6 +379,15 @@
 
                                                                 <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal"
                                                                             HorizontalAlignment="Right" Margin="0,5,0,0">
+                                                                    <StackPanel.Style>
+                                                                        <Style TargetType="StackPanel">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding ShowBehaviorControls}" Value="False">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </StackPanel.Style>
                                                                     <TextBlock Text="Behavior" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="10" Margin="0,0,10,0" />
                                                                     <StackPanel Orientation="Horizontal">
                                                                         <StackPanel.Style>

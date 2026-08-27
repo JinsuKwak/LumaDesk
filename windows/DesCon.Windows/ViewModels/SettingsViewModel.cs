@@ -82,8 +82,10 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
     private MacDisplayBehavior _macBehavior;
     private WindowsDisplayBehavior _behavior;
     private bool _showMacBehavior;
+    private bool _showBehaviorControls;
 
     public string MonitorID => _monitor.Id;
+    public string ProfileKey => StorageKey;
     private string StorageKey => _monitor.ProfileStorageKey;
     private readonly MonitorDefinition _monitor;
 
@@ -100,6 +102,7 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
             StorageKey,
             profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged));
         _showMacBehavior = profile.CoordinationMode == ProfileCoordinationMode.Managed;
+        _showBehaviorControls = profile.CoordinationMode != ProfileCoordinationMode.Self;
     }
 
     public bool IsIncluded { get => _isIncluded; set => Set(ref _isIncluded, value); }
@@ -108,6 +111,7 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
     public MacDisplayBehavior MacBehavior { get => _macBehavior; set => Set(ref _macBehavior, value); }
     public WindowsDisplayBehavior Behavior { get => _behavior; set => Set(ref _behavior, value); }
     public bool ShowMacBehavior { get => _showMacBehavior; set => Set(ref _showMacBehavior, value); }
+    public bool ShowBehaviorControls { get => _showBehaviorControls; set => Set(ref _showBehaviorControls, value); }
     public Array MacBehaviors => Enum.GetValues<MacDisplayBehavior>();
     public Array Behaviors => Enum.GetValues<WindowsDisplayBehavior>();
 
@@ -144,6 +148,23 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
     }
 }
 
+public sealed class ProfilePrimaryMonitorOption : ObservableModel
+{
+    private readonly MonitorDefinition _monitor;
+
+    public ProfilePrimaryMonitorOption(MonitorDefinition monitor) => _monitor = monitor;
+
+    public string Id => _monitor.ProfileStorageKey;
+    public string LocalId => _monitor.Id;
+    public string Label => $"{_monitor.DisplayLabel} · {_monitor.Name}";
+
+    public void Refresh()
+    {
+        Changed(nameof(Id));
+        Changed(nameof(Label));
+    }
+}
+
 public sealed class ProfileEditorViewModel : ObservableModel
 {
     public SwitchingProfile Model { get; }
@@ -151,15 +172,35 @@ public sealed class ProfileEditorViewModel : ObservableModel
     private ProfileCoordinationMode _coordinationMode;
     private bool _isFavorite;
     private string _hotKeyText;
+    private ProfilePrimaryMonitorOption? _selfPrimaryMonitor;
+    private ProfilePrimaryMonitorOption? _peerPrimaryMonitor;
 
     public ProfileEditorViewModel(SwitchingProfile model, IEnumerable<MonitorDefinition> monitors, Guid? favoriteID)
     {
+        var monitorList = monitors.ToList();
         Model = model;
         _name = model.Name;
         _coordinationMode = model.CoordinationMode;
         _isFavorite = favoriteID == model.Id;
         _hotKeyText = model.WindowsHotKey?.DisplayText ?? "Set shortcut";
-        Monitors = new ObservableCollection<ProfileMonitorRowViewModel>(monitors.Select(item => new ProfileMonitorRowViewModel(item, model)));
+        Monitors = new ObservableCollection<ProfileMonitorRowViewModel>(monitorList.Select(item => new ProfileMonitorRowViewModel(item, model)));
+        PrimaryMonitorOptions = new ObservableCollection<ProfilePrimaryMonitorOption>(
+            monitorList.Select(item => new ProfilePrimaryMonitorOption(item)));
+        _selfPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
+            string.Equals(item.Id, model.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(item.LocalId, model.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase));
+        _peerPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
+            string.Equals(item.Id, model.PeerPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(item.LocalId, model.PeerPrimaryMonitorId, StringComparison.OrdinalIgnoreCase));
+        if (_coordinationMode == ProfileCoordinationMode.Self && _selfPrimaryMonitor is null)
+        {
+            var firstIncluded = Monitors.FirstOrDefault(item => item.IsIncluded)?.ProfileKey;
+            _selfPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
+                string.Equals(item.Id, firstIncluded, StringComparison.OrdinalIgnoreCase))
+                ?? PrimaryMonitorOptions.FirstOrDefault();
+        }
+        if (_coordinationMode == ProfileCoordinationMode.Self && _peerPrimaryMonitor is null)
+            _peerPrimaryMonitor = _selfPrimaryMonitor;
     }
 
     public Guid Id => Model.Id;
@@ -171,12 +212,42 @@ public sealed class ProfileEditorViewModel : ObservableModel
         {
             if (!Set(ref _coordinationMode, value)) return;
             Changed(nameof(IsExternal));
+            Changed(nameof(IsSelf));
             Changed(nameof(DirectionLabel));
-            foreach (var monitor in Monitors) monitor.ShowMacBehavior = value == ProfileCoordinationMode.Managed;
+            foreach (var monitor in Monitors)
+            {
+                monitor.ShowMacBehavior = value == ProfileCoordinationMode.Managed;
+                monitor.ShowBehaviorControls = value != ProfileCoordinationMode.Self;
+            }
+            if (value == ProfileCoordinationMode.Self && SelfPrimaryMonitor is null)
+            {
+                var firstIncluded = Monitors.FirstOrDefault(item => item.IsIncluded)?.ProfileKey;
+                SelfPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
+                    string.Equals(item.Id, firstIncluded, StringComparison.OrdinalIgnoreCase))
+                    ?? PrimaryMonitorOptions.FirstOrDefault();
+            }
+            if (value == ProfileCoordinationMode.Self && PeerPrimaryMonitor is null)
+                PeerPrimaryMonitor = SelfPrimaryMonitor;
         }
     }
     public bool IsExternal => CoordinationMode == ProfileCoordinationMode.External;
-    public string DirectionLabel => IsExternal ? "One-way DDC" : "Windows → Mac";
+    public bool IsSelf => CoordinationMode == ProfileCoordinationMode.Self;
+    public string DirectionLabel => CoordinationMode switch
+    {
+        ProfileCoordinationMode.External => "One-way DDC",
+        ProfileCoordinationMode.Self => "All assigned monitors → this PC",
+        _ => "Windows → Mac"
+    };
+    public ProfilePrimaryMonitorOption? SelfPrimaryMonitor
+    {
+        get => _selfPrimaryMonitor;
+        set => Set(ref _selfPrimaryMonitor, value);
+    }
+    public ProfilePrimaryMonitorOption? PeerPrimaryMonitor
+    {
+        get => _peerPrimaryMonitor;
+        set => Set(ref _peerPrimaryMonitor, value);
+    }
     public bool IsFavorite
     {
         get => _isFavorite;
@@ -189,14 +260,20 @@ public sealed class ProfileEditorViewModel : ObservableModel
     public string HotKeyText { get => _hotKeyText; set => Set(ref _hotKeyText, value); }
     public Array CoordinationModes => Enum.GetValues<ProfileCoordinationMode>();
     public ObservableCollection<ProfileMonitorRowViewModel> Monitors { get; }
+    public ObservableCollection<ProfilePrimaryMonitorOption> PrimaryMonitorOptions { get; }
 
     public void EnsureMonitor(MonitorDefinition monitor)
     {
         var existing = Monitors.FirstOrDefault(item => string.Equals(item.MonitorID, monitor.Id, StringComparison.OrdinalIgnoreCase));
         if (existing is null)
         {
-            var row = new ProfileMonitorRowViewModel(monitor, Model) { ShowMacBehavior = CoordinationMode == ProfileCoordinationMode.Managed };
+            var row = new ProfileMonitorRowViewModel(monitor, Model)
+            {
+                ShowMacBehavior = CoordinationMode == ProfileCoordinationMode.Managed,
+                ShowBehaviorControls = CoordinationMode != ProfileCoordinationMode.Self
+            };
             Monitors.Add(row);
+            PrimaryMonitorOptions.Add(new ProfilePrimaryMonitorOption(monitor));
         }
         else existing.Refresh();
     }
@@ -204,17 +281,40 @@ public sealed class ProfileEditorViewModel : ObservableModel
     public void RefreshMonitorLabels()
     {
         foreach (var monitor in Monitors) monitor.Refresh();
+        foreach (var option in PrimaryMonitorOptions) option.Refresh();
     }
 
     public bool Apply(out string error)
     {
         error = "";
+        if (CoordinationMode == ProfileCoordinationMode.Self && Monitors.Any(item => item.IsIncluded))
+        {
+            if (!IsIncluded(SelfPrimaryMonitor))
+            {
+                error = $"{Name}: this PC primary must be one of the enabled monitors.";
+                return false;
+            }
+            if (!IsIncluded(PeerPrimaryMonitor))
+            {
+                error = $"{Name}: peer fallback primary must be one of the enabled monitors.";
+                return false;
+            }
+        }
+
         Model.Name = Name.Trim();
         Model.CoordinationMode = CoordinationMode;
         foreach (var row in Monitors)
             if (!row.Apply(Model, out error)) return false;
+        Model.SelfPrimaryMonitorId = SelfPrimaryMonitor?.Id ?? "";
+        Model.PeerPrimaryMonitorId = PeerPrimaryMonitor?.Id ?? Model.SelfPrimaryMonitorId;
         return true;
     }
+
+    private bool IsIncluded(ProfilePrimaryMonitorOption? selected) =>
+        selected is not null && Monitors.Any(item =>
+            item.IsIncluded &&
+            (string.Equals(item.ProfileKey, selected.Id, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(item.MonitorID, selected.LocalId, StringComparison.OrdinalIgnoreCase)));
 }
 
 public sealed class SettingsViewModel : ObservableModel

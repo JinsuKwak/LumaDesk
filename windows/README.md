@@ -7,7 +7,8 @@ Native Windows 10/11 tray client for DesCon switching profiles.
 - Favorite tray action, complete profile submenu, and per-profile global hotkeys
 - Persistent EDID identities so Windows display numbers can change safely
 - Standard DXVA2 DDC plus NVIDIA raw I²C for custom LG packet-source commands
-- Managed Mac/Windows LAN transactions and one-way named external profiles
+- Managed Mac/Windows LAN transactions, symmetric This Device profiles, and
+  one-way named external profiles
 - Reversible session-only display disable, extended restore, primary selection,
   and clone topology
 
@@ -33,9 +34,11 @@ Private networks only. Enter the same pairing key in the Mac and Windows apps.
 ## Switching order
 
 1. Managed profile asks the Mac peer to prepare.
-2. Windows establishes a fallback primary if necessary.
+2. Windows establishes the selected local or peer fallback primary if necessary.
 3. Windows sends DDC while the monitor path is still available.
 4. Windows commits the peer transaction.
-5. Windows applies post-switch `Disabled`, `Extended`, or mirror behavior.
+5. Windows applies post-switch `Disabled`, `Extended`, or mirror behavior. A
+   returning path gets a short bounded restore retry so a previous Show-only
+   topology cannot leave it detached.
 
 External profiles skip steps 1 and 4 and report `sent · unverified`.

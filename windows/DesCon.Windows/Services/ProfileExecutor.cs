@@ -45,7 +45,7 @@ public sealed class ProfileExecutor
             var errors = new List<string>();
             Guid? transactionID = null;
 
-            if (profile.CoordinationMode == ProfileCoordinationMode.Managed)
+            if (RequiresPeer(profile.CoordinationMode))
             {
                 var preparation = await _peer.PrepareAsync(profile);
                 if (!preparation.Ready)
@@ -59,7 +59,8 @@ public sealed class ProfileExecutor
             // Displays returning to Windows must be active before their monitor
             // input is switched back. A replacement primary must also be ready
             // before any other Windows path is detached.
-            ApplyActiveBehaviors(windowsActions, errors);
+            var preSwitchTopologyErrors = new List<string>();
+            ApplyActiveBehaviors(windowsActions, preSwitchTopologyErrors);
 
             var delivered = 0;
             foreach (var (monitorID, value) in profile.InputAssignments)
@@ -72,6 +73,12 @@ public sealed class ProfileExecutor
 
             await Task.Delay(600);
 
+            // A monitor handed back from Mac may not expose an active Windows
+            // path until after its DDC input changes. Reapply any requested
+            // Primary/Extended layout with a short bounded retry, including
+            // managed profiles which restore a previously disabled display.
+            await RecoverActiveBehaviorsAsync(windowsActions, errors);
+
             if (transactionID is { } preparedTransaction)
             {
                 var commit = await _peer.CommitAsync(preparedTransaction);
@@ -80,7 +87,7 @@ public sealed class ProfileExecutor
                     if (settings.Network.RollbackOnPeerFailure && previousProfile is not null)
                     {
                         var rollbackErrors = await RestorePreviousProfileAsync(previousProfile, monitors);
-                        if (previousProfile.CoordinationMode == ProfileCoordinationMode.Managed)
+                        if (RequiresPeer(previousProfile.CoordinationMode))
                         {
                             var peerRollback = await _peer.RevertAsync(previousProfile);
                             if (!peerRollback.Ok) rollbackErrors.Add($"Peer rollback: {peerRollback.Detail}");
@@ -142,7 +149,7 @@ public sealed class ProfileExecutor
                 .Select(group => group.Last())
                 .ToList();
 
-            ApplyActiveBehaviors(windowsActions, errors);
+            await RecoverActiveBehaviorsAsync(windowsActions, errors);
             await ApplyDisabledBehaviorsAsync(windowsActions, errors);
 
             if (errors.Count == 0) _lastSuccessfulLocalProfileID = null;
@@ -161,6 +168,29 @@ public sealed class ProfileExecutor
         SwitchingProfile profile,
         IReadOnlyDictionary<string, MonitorDefinition> monitors)
     {
+        if (profile.CoordinationMode == ProfileCoordinationMode.Self)
+        {
+            var includedMonitors = profile.InputAssignments.Keys
+                .Where(monitors.ContainsKey)
+                .Select(key => monitors[key])
+                .GroupBy(monitor => monitor.Id, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .OrderBy(monitor => monitor.DisplayNumber)
+                .ToList();
+            var primary = includedMonitors.FirstOrDefault(monitor =>
+                    string.Equals(monitor.ProfileStorageKey, profile.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(monitor.Id, profile.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase))
+                ?? includedMonitors.FirstOrDefault();
+
+            return includedMonitors
+                .Select(monitor => (
+                    Monitor: monitor,
+                    Behavior: monitor == primary
+                        ? WindowsDisplayBehavior.Primary
+                        : WindowsDisplayBehavior.Extended))
+                .ToList();
+        }
+
         return profile.WindowsDisplayBehaviors
             .Where(item => monitors.ContainsKey(item.Key))
             .Select(item => (Monitor: monitors[item.Key], Behavior: item.Value))
@@ -169,13 +199,17 @@ public sealed class ProfileExecutor
             .ToList();
     }
 
+    private static bool RequiresPeer(ProfileCoordinationMode mode) =>
+        mode is ProfileCoordinationMode.Managed or ProfileCoordinationMode.Self;
+
     private async Task<List<string>> RestorePreviousProfileAsync(
         SwitchingProfile profile,
         IReadOnlyDictionary<string, MonitorDefinition> monitors)
     {
         var errors = new List<string>();
         var actions = ResolveWindowsActions(profile, monitors);
-        ApplyActiveBehaviors(actions, errors);
+        var preSwitchTopologyErrors = new List<string>();
+        ApplyActiveBehaviors(actions, preSwitchTopologyErrors);
 
         foreach (var (monitorID, value) in profile.InputAssignments)
         {
@@ -185,6 +219,7 @@ public sealed class ProfileExecutor
         }
 
         await Task.Delay(600);
+        await RecoverActiveBehaviorsAsync(actions, errors);
         await ApplyDisabledBehaviorsAsync(actions, errors);
         return errors;
     }
@@ -212,42 +247,57 @@ public sealed class ProfileExecutor
         }
     }
 
+    private async Task RecoverActiveBehaviorsAsync(
+        IReadOnlyCollection<(MonitorDefinition Monitor, WindowsDisplayBehavior Behavior)> actions,
+        ICollection<string> errors)
+    {
+        var activeMonitors = actions
+            .Where(item => item.Behavior is WindowsDisplayBehavior.Primary
+                or WindowsDisplayBehavior.Extended
+                or WindowsDisplayBehavior.MirrorPrimary)
+            .Select(item => item.Monitor)
+            .DistinctBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (activeMonitors.Count == 0) return;
+
+        List<string> lastErrors = [];
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            lastErrors = [];
+            ApplyActiveBehaviors(actions, lastErrors);
+            var verificationError = "";
+            var activeVerified = lastErrors.Count == 0 &&
+                _topology.AreActive(activeMonitors, out verificationError);
+            if (activeVerified)
+                return;
+            if (!string.IsNullOrWhiteSpace(verificationError)) lastErrors.Add(verificationError);
+            if (attempt < 2) await Task.Delay(attempt == 0 ? 650 : 900);
+        }
+
+        foreach (var error in lastErrors.Distinct()) errors.Add(error);
+    }
+
     private async Task ApplyDisabledBehaviorsAsync(
         IReadOnlyCollection<(MonitorDefinition Monitor, WindowsDisplayBehavior Behavior)> actions,
         ICollection<string> errors)
     {
-        foreach (var action in actions.Where(item => item.Behavior == WindowsDisplayBehavior.Disabled))
-            await DisableAndVerifyAsync(action.Monitor, errors);
-    }
+        var disabledMonitors = actions
+            .Where(item => item.Behavior == WindowsDisplayBehavior.Disabled)
+            .Select(item => item.Monitor)
+            .DistinctBy(item => item.Id, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (disabledMonitors.Count == 0) return;
 
-    private async Task DisableAndVerifyAsync(MonitorDefinition monitor, ICollection<string> errors)
-    {
-        const int maximumPolls = 10;
-        const int stableInactivePollsRequired = 4;
-        var stableInactivePolls = 0;
-        var lastError = "";
-
-        for (var poll = 0; poll < maximumPolls; poll++)
+        if (!_topology.Disable(disabledMonitors, out var disableError))
         {
-            if (_topology.IsActive(monitor))
-            {
-                stableInactivePolls = 0;
-                if (!_topology.Disable(monitor, out var error)) lastError = error;
-            }
-            else
-            {
-                stableInactivePolls++;
-                if (stableInactivePolls >= stableInactivePollsRequired) return;
-            }
-
-            if (poll + 1 < maximumPolls) await Task.Delay(500);
+            errors.Add(disableError);
+            return;
         }
 
-        var detail = _topology.IsActive(monitor)
-            ? string.IsNullOrWhiteSpace(lastError)
-                ? "Windows kept the display attached to the desktop."
-                : lastError
-            : "The detached state did not remain stable long enough to verify.";
-        errors.Add($"{monitor.DisplayLabel}: {detail}");
+        // SetDisplayConfig is synchronous; allow only a short event-settling
+        // window, then perform one fresh path query. There is no repeated poll.
+        await Task.Delay(350);
+        if (!_topology.AreInactive(disabledMonitors, out var verificationError))
+            errors.Add(verificationError);
     }
 }

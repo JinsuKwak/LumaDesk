@@ -18,7 +18,8 @@ public sealed class MonitorDiscoveryService
         {
             var adapter = NativeMethods.DISPLAY_DEVICE.Create();
             if (!NativeMethods.EnumDisplayDevices(null, adapterIndex, ref adapter, 0)) break;
-            if ((adapter.StateFlags & NativeMethods.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) == 0) continue;
+            var isAttachedToDesktop =
+                (adapter.StateFlags & NativeMethods.DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) != 0;
 
             for (uint monitorIndex = 0; ; monitorIndex++)
             {
@@ -29,8 +30,8 @@ public sealed class MonitorDiscoveryService
                         ref monitor,
                         NativeMethods.EDD_GET_DEVICE_INTERFACE_NAME)) break;
 
-                var stableID = StableId(monitor.DeviceID, monitor.DeviceKey, adapter.DeviceName, monitorIndex);
                 var edid = MatchEdid(monitor.DeviceID, edids, usedEdids);
+                var stableID = StableId(monitor.DeviceID, monitor.DeviceKey, adapter.DeviceName, monitorIndex);
                 var name = physicalNames.TryGetValue(adapter.DeviceName, out var physicalName) && !string.IsNullOrWhiteSpace(physicalName)
                     ? physicalName
                     : string.IsNullOrWhiteSpace(monitor.DeviceString) ? "External display" : monitor.DeviceString;
@@ -43,7 +44,10 @@ public sealed class MonitorDiscoveryService
                     GdiDeviceName = adapter.DeviceName,
                     DevicePath = monitor.DeviceID ?? monitor.DeviceKey ?? "",
                     DisplayNumber = DisplayNumber(adapter.DeviceName),
-                    IsConnected = true
+                    // Keep an enumerated but session-disabled target so a later
+                    // profile can restore its current GDI/connector path. This
+                    // is especially important after a Show-only transition.
+                    IsConnected = isAttachedToDesktop
                 });
             }
         }
@@ -117,12 +121,34 @@ public sealed class MonitorDiscoveryService
         IReadOnlyList<EdidIdentity> edids,
         ISet<string> used)
     {
-        var match = edids.FirstOrDefault(item =>
-            !used.Contains(item.RegistryPath) &&
-            (string.IsNullOrWhiteSpace(deviceID) || deviceID.Contains(item.HardwareCode, StringComparison.OrdinalIgnoreCase)));
+        var candidates = edids
+            .Where(item =>
+                !used.Contains(item.RegistryPath) &&
+                (string.IsNullOrWhiteSpace(deviceID) ||
+                 deviceID.Contains(item.HardwareCode, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+
+        // With EDD_GET_DEVICE_INTERFACE_NAME, DeviceID contains the PnP monitor
+        // instance path (for example DISPLAY#GSMxxxx#<instance>#{guid}). Match
+        // that instance exactly instead of assigning the first EDID belonging to
+        // the same monitor model. Two identical monitors otherwise exchange
+        // serial identities whenever Windows changes their enumeration order.
+        var canonicalDeviceID = CanonicalIdentity(deviceID ?? "");
+        var exactMatches = candidates
+            .Where(item =>
+                !string.IsNullOrWhiteSpace(item.InstanceName) &&
+                canonicalDeviceID.Contains(CanonicalIdentity(item.InstanceName), StringComparison.Ordinal))
+            .ToList();
+
+        var match = exactMatches.Count == 1
+            ? exactMatches[0]
+            : candidates.Count == 1 ? candidates[0] : null;
         if (match is not null) used.Add(match.RegistryPath);
         return match;
     }
+
+    private static string CanonicalIdentity(string value) =>
+        new(value.ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
 
     private static List<EdidIdentity> ReadRegistryEdids()
     {
@@ -138,14 +164,18 @@ public sealed class MonitorDiscoveryService
             {
                 using var parameters = hardware.OpenSubKey(instanceName + @"\Device Parameters");
                 if (parameters?.GetValue("EDID") is not byte[] edid || edid.Length < 128) continue;
-                var identity = ParseEdid(edid, hardwareCode, @$"{hardwareCode}\{instanceName}");
+                var identity = ParseEdid(edid, hardwareCode, instanceName, @$"{hardwareCode}\{instanceName}");
                 if (identity is not null) result.Add(identity);
             }
         }
         return result;
     }
 
-    private static EdidIdentity? ParseEdid(byte[] edid, string hardwareCode, string registryPath)
+    private static EdidIdentity? ParseEdid(
+        byte[] edid,
+        string hardwareCode,
+        string instanceName,
+        string registryPath)
     {
         var manufacturer = string.Concat(
             (char)(((edid[8] >> 2) & 0x1F) + 64),
@@ -160,11 +190,11 @@ public sealed class MonitorDiscoveryService
         }
         if (string.IsNullOrWhiteSpace(productName) || string.IsNullOrWhiteSpace(serialText)) return null;
 
-        static string Canonical(string value) => new(value.ToUpperInvariant().Where(char.IsLetterOrDigit).ToArray());
         return new EdidIdentity(
             hardwareCode,
+            instanceName,
             registryPath,
-            $"EDID:{Canonical(manufacturer)}:{Canonical(productName)}:{Canonical(serialText)}");
+            $"EDID:{CanonicalIdentity(manufacturer)}:{CanonicalIdentity(productName)}:{CanonicalIdentity(serialText)}");
     }
 
     private static string DescriptorText(byte[] edid, byte tag)
@@ -177,5 +207,9 @@ public sealed class MonitorDiscoveryService
         return "";
     }
 
-    private sealed record EdidIdentity(string HardwareCode, string RegistryPath, string SharedID);
+    private sealed record EdidIdentity(
+        string HardwareCode,
+        string InstanceName,
+        string RegistryPath,
+        string SharedID);
 }

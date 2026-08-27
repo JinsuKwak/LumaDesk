@@ -169,7 +169,9 @@ final class DisplaySyncService {
             }
         }
 
-        guard Date() >= topologyCooldownUntil, activeProfileID != nil else { return }
+        guard Date() >= topologyCooldownUntil,
+              activeProfileID != nil || activeRemoteProfile != nil
+        else { return }
         topologyDebounceTask?.cancel()
         topologyDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -389,7 +391,7 @@ final class DisplaySyncService {
         })
 
         var peerTransactionID: UUID?
-        if profile.coordinationMode == .managed {
+        if requiresPeer(profile.coordinationMode) {
             let preparation = await peerService.prepare(profile: wireProfile(from: profile))
             guard preparation.ready, let transactionID = preparation.transactionID else {
                 statusHandler?("\(profile.name): \(preparation.detail)")
@@ -404,6 +406,9 @@ final class DisplaySyncService {
         applyTopology(profile)
 
         let inputResult = await switchInputs(for: profile)
+        if inputResult.successful {
+            await recoverTopologyAfterInputSwitch(profile)
+        }
 
         if inputResult.successful {
             statusHandler?(profile.coordinationMode == .external
@@ -421,7 +426,7 @@ final class DisplaySyncService {
             if !commit.ok {
                 if peerService.rollbackOnPeerFailure, let previousProfile {
                     var rollbackErrors = await restorePreviousProfile(previousProfile)
-                    if previousProfile.coordinationMode == .managed {
+                    if requiresPeer(previousProfile.coordinationMode) {
                         let peerRollback = await peerService.revert(profile: wireProfile(from: previousProfile))
                         if !peerRollback.ok { rollbackErrors.append("Peer rollback: \(peerRollback.detail)") }
                     }
@@ -504,6 +509,9 @@ final class DisplaySyncService {
         activeRemoteProfile = nil
         applyTopology(profile)
         let result = await switchInputs(for: profile)
+        if result.successful {
+            await recoverTopologyAfterInputSwitch(profile)
+        }
         return result.failures
     }
 
@@ -520,29 +528,93 @@ final class DisplaySyncService {
         applyTopology(profile)
     }
 
-    private func applyTopology(_ profile: DisplaySwitchingProfile) {
+    @discardableResult
+    private func applyTopology(_ profile: DisplaySwitchingProfile) -> Bool {
         let targets = sessions.values.compactMap { session in
             session.isConnected ? session.target : nil
         }
         var localProfile = profile
         localProfile.macDisplayBehaviors = [:]
-        for session in sessions.values {
-            if let behavior = profileValue(profile.macDisplayBehaviors, for: session) {
-                localProfile.macDisplayBehaviors[session.id] = behavior
+        if profile.coordinationMode == .thisDevice, !profile.inputAssignments.isEmpty {
+            let included = sessions.values
+                .filter { profileValue(profile.inputAssignments, for: $0) != nil }
+                .sorted { $0.displayNumber < $1.displayNumber }
+            let primary = included.first(where: {
+                profileStorageKey(for: $0).caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame ||
+                    $0.id.caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame
+            }) ?? included.first
+            for session in included {
+                localProfile.macDisplayBehaviors[session.id] = session.id == primary?.id ? .primary : .extended
+            }
+        } else {
+            for session in sessions.values {
+                if let behavior = profileValue(profile.macDisplayBehaviors, for: session) {
+                    localProfile.macDisplayBehaviors[session.id] = behavior
+                }
             }
         }
 
         switch topologyService.apply(profile: localProfile, connectedTargets: targets) {
         case .applied:
             topologyCooldownUntil = Date().addingTimeInterval(0.6)
+            return true
         case .noMatchingDisplays:
-            break
+            return false
         case .failed(let error):
             statusHandler?("Topology failed (\(error.rawValue))")
+            return false
+        }
+    }
+
+    /// DDC input changes can make CoreGraphics remove and recreate a display.
+    /// Retry only around this transition; steady state remains event-driven.
+    private func recoverTopologyAfterInputSwitch(_ profile: DisplaySwitchingProfile) async {
+        try? await Task.sleep(nanoseconds: 650_000_000)
+        for attempt in 0 ..< 3 {
+            guard !Task.isCancelled else { return }
+            await reconcileDisplays()
+            if applyTopology(profile) { return }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
         }
     }
 
     private func wireProfile(from profile: DisplaySwitchingProfile) -> WireProfile {
+        if profile.coordinationMode == .thisDevice {
+            let included = sessions.values
+                .compactMap { session -> (ManagedDisplaySession, UInt16)? in
+                    guard let input = profileValue(profile.inputAssignments, for: session) else { return nil }
+                    return (session, input)
+                }
+                .sorted { $0.0.displayNumber < $1.0.displayNumber }
+            let primary = included.first(where: {
+                profileStorageKey(for: $0.0).caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame ||
+                    $0.0.id.caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame
+            }) ?? included.first
+            let peerPrimary = included.first(where: {
+                profileStorageKey(for: $0.0).caseInsensitiveCompare(profile.peerPrimaryMonitorID) == .orderedSame ||
+                    $0.0.id.caseInsensitiveCompare(profile.peerPrimaryMonitorID) == .orderedSame
+            }) ?? primary
+            let actions = included.map { session, input in
+                WireMonitorAction(
+                    sharedID: networkIdentity(for: session),
+                    inputValue: input,
+                    macBehavior: (session.id == primary?.0.id
+                        ? MacDisplayBehavior.primary
+                        : MacDisplayBehavior.extended).rawValue,
+                    windowsBehavior: session.id == peerPrimary?.0.id ? .primary : .disabled
+                )
+            }
+            return WireProfile(
+                id: profile.id,
+                name: profile.name,
+                coordinationMode: profile.coordinationMode,
+                managedTarget: .windows,
+                monitors: actions
+            )
+        }
+
         let actions = sessions.values.compactMap { session -> WireMonitorAction? in
             let input = profileValue(profile.inputAssignments, for: session)
             let macBehavior = profileValue(profile.macDisplayBehaviors, for: session) ?? .unchanged
@@ -563,6 +635,10 @@ final class DisplaySyncService {
             managedTarget: .windows,
             monitors: actions
         )
+    }
+
+    private func requiresPeer(_ mode: ProfileCoordinationMode) -> Bool {
+        mode == .managed || mode == .thisDevice
     }
 
     private func applyRemoteProfile(_ wireProfile: WireProfile) async {

@@ -39,7 +39,9 @@
       "properties": {
         "id": { "type": "string", "format": "uuid" },
         "name": { "type": "string", "minLength": 1 },
-        "coordinationMode": { "enum": ["managed", "external"] },
+        "coordinationMode": { "enum": ["managed", "self", "external"] },
+        "selfPrimaryMonitorID": { "type": "string" },
+        "peerPrimaryMonitorID": { "type": "string" },
         "inputAssignments": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 65535 }

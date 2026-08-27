@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace DesCon.Windows.Interop;
 
-internal static class NativeMethods
+internal static partial class NativeMethods
 {
     internal const int EDD_GET_DEVICE_INTERFACE_NAME = 0x00000001;
     internal const int DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001;

@@ -184,7 +184,7 @@ final class LANPeerService {
             guard let prepare = try? decoder.decode(PreparePayload.self, from: payload) else {
                 return PeerResponse(ok: false, detail: "Invalid profile payload.")
             }
-            guard prepare.profile.coordinationMode == .managed,
+            guard requiresPeer(prepare.profile.coordinationMode),
                   prepare.profile.managedTarget == .macOS
             else {
                 return PeerResponse(ok: false, detail: "This profile does not target Mac.")
@@ -201,7 +201,7 @@ final class LANPeerService {
             return PeerResponse(ok: true, detail: "Applied")
         case "revert":
             guard let profile = try? decoder.decode(WireProfile.self, from: payload),
-                  profile.coordinationMode == .managed,
+                  requiresPeer(profile.coordinationMode),
                   profile.managedTarget == .macOS
             else {
                 return PeerResponse(ok: false, detail: "Invalid Mac rollback profile.")
@@ -211,6 +211,10 @@ final class LANPeerService {
         default:
             return PeerResponse(ok: false, detail: "Unknown command.")
         }
+    }
+
+    private func requiresPeer(_ mode: ProfileCoordinationMode) -> Bool {
+        mode == .managed || mode == .thisDevice
     }
 
     private func startDiscovery() {

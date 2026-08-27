@@ -82,7 +82,7 @@ enum AppleSiliconDDCMinimal {
     static func discoverDisplays() -> [AppleSiliconDDCDisplay] {
         guard isSupportedPlatform else { return [] }
 
-        return getIORegistryServicesForMatching()
+        let services = getIORegistryServicesForMatching()
             .filter { service in
                 service.service != nil
                     && (!service.edidUUID.isEmpty
@@ -91,27 +91,48 @@ enum AppleSiliconDDCMinimal {
                         || !service.transportUpstream.isEmpty
                         || !service.transportDownstream.isEmpty)
             }
-            .map { service in
-                let stableID = [
-                    service.edidUUID,
-                    service.alphanumericSerialNumber,
-                    service.ioDisplayLocation
-                ]
-                    .first { !$0.isEmpty } ?? UUID().uuidString
 
-                return AppleSiliconDDCDisplay(
-                    id: stableID,
-                    edidUUID: service.edidUUID,
-                    manufacturerID: service.manufacturerID,
-                    productName: service.productName,
-                    serialNumber: service.serialNumber,
-                    alphanumericSerialNumber: service.alphanumericSerialNumber,
-                    ioDisplayLocation: service.ioDisplayLocation,
-                    transportUpstream: service.transportUpstream,
-                    transportDownstream: service.transportDownstream,
-                    service: service.service
-                )
+        let edidUUIDCounts = frequencyMap(services.map(\.edidUUID))
+        let serialCounts = frequencyMap(services.map(\.alphanumericSerialNumber))
+
+        return services.map { service in
+            // Prefer panel identity when it is genuinely unique. Some
+            // identical displays report a blank or duplicated EDID UUID;
+            // in that case the IORegistry connection path is a safer local
+            // fallback than whichever display happened to enumerate first.
+            let stableID: String
+            if !service.edidUUID.isEmpty, edidUUIDCounts[service.edidUUID] == 1 {
+                stableID = service.edidUUID
+            } else if !service.alphanumericSerialNumber.isEmpty,
+                      serialCounts[service.alphanumericSerialNumber] == 1
+            {
+                stableID = service.alphanumericSerialNumber
+            } else if !service.ioDisplayLocation.isEmpty {
+                stableID = service.ioDisplayLocation
+            } else {
+                stableID = UUID().uuidString
             }
+
+            return AppleSiliconDDCDisplay(
+                id: stableID,
+                edidUUID: service.edidUUID,
+                manufacturerID: service.manufacturerID,
+                productName: service.productName,
+                serialNumber: service.serialNumber,
+                alphanumericSerialNumber: service.alphanumericSerialNumber,
+                ioDisplayLocation: service.ioDisplayLocation,
+                transportUpstream: service.transportUpstream,
+                transportDownstream: service.transportDownstream,
+                service: service.service
+            )
+        }
+    }
+
+    private static func frequencyMap(_ values: [String]) -> [String: Int] {
+        values.reduce(into: [:]) { counts, value in
+            guard !value.isEmpty else { return }
+            counts[value, default: 0] += 1
+        }
     }
 
     static func read(service: IOAVService?, command: UInt8) -> DDCValue? {

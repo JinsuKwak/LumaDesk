@@ -58,22 +58,50 @@ public partial class App : System.Windows.Application
 
     private void MergeDiscoveredMonitors()
     {
+        var discoveredMonitors = _monitorDiscovery.Discover();
+        var uniqueConnectedEdids = discoveredMonitors
+            .Where(item => item.SharedId.StartsWith("EDID:", StringComparison.OrdinalIgnoreCase))
+            .GroupBy(item => item.SharedId, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() == 1)
+            .Select(group => group.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var claimedSavedMonitors = new HashSet<MonitorDefinition>();
+
         foreach (var saved in _settings.Monitors) saved.IsConnected = false;
-        foreach (var discovered in _monitorDiscovery.Discover())
+        foreach (var discovered in discoveredMonitors)
         {
-            var saved = _settings.Monitors.FirstOrDefault(item => string.Equals(item.Id, discovered.Id, StringComparison.OrdinalIgnoreCase));
+            // Display 1/2 and the monitor interface path can change after a
+            // reboot. Preserve the user's Pairing ID by following the unique
+            // EDID serial first, then fall back to the local interface path for
+            // monitors that do not expose a usable serial.
+            MonitorDefinition? saved = null;
+            if (uniqueConnectedEdids.Contains(discovered.SharedId))
+            {
+                var serialMatches = _settings.Monitors
+                    .Where(item =>
+                        !claimedSavedMonitors.Contains(item) &&
+                        string.Equals(item.SharedId, discovered.SharedId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (serialMatches.Count == 1) saved = serialMatches[0];
+            }
+
+            saved ??= _settings.Monitors.FirstOrDefault(item =>
+                !claimedSavedMonitors.Contains(item) &&
+                string.Equals(item.Id, discovered.Id, StringComparison.OrdinalIgnoreCase));
             if (saved is null)
             {
                 _settings.Monitors.Add(discovered);
+                claimedSavedMonitors.Add(discovered);
                 continue;
             }
 
+            claimedSavedMonitors.Add(saved);
             saved.Name = discovered.Name;
             saved.SharedId = discovered.SharedId;
             saved.DisplayNumber = discovered.DisplayNumber;
             saved.GdiDeviceName = discovered.GdiDeviceName;
             saved.DevicePath = discovered.DevicePath;
-            saved.IsConnected = true;
+            saved.IsConnected = discovered.IsConnected;
         }
     }
 
