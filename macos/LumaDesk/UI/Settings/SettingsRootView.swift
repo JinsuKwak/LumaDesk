@@ -1164,6 +1164,18 @@ struct SettingsRootView: View {
             }
             .padding(.leading, 25)
 
+            if switchingProfileDrafts[index].coordinationMode == .managed {
+                Toggle("Restore Windows layout after handoff", isOn: Binding(
+                    get: { switchingProfileDrafts[index].restorePeerLayout },
+                    set: { switchingProfileDrafts[index].restorePeerLayout = $0 }
+                ))
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+                .font(.caption)
+                .padding(.leading, 25)
+                .help("After DDC switches the inputs, ask Windows to restore its requested Primary/Extended layout.")
+            }
+
             if switchingProfileDrafts[index].coordinationMode == .thisDevice ||
                 switchingProfileDrafts[index].coordinationMode == .restore {
                 VStack(alignment: .leading, spacing: 5) {

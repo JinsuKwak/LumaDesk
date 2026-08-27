@@ -25,7 +25,7 @@ final class DisplaySyncService {
     private var lastBuiltInBrightness: Double?
     private var activeProfileID: UUID?
     private var lastSuccessfulLocalProfileID: UUID?
-    private var activeRemoteProfile: DisplaySwitchingProfile?
+    private var activeRemoteWireProfile: WireProfile?
     private var topologyCooldownUntil = Date.distantPast
 
     init(
@@ -40,6 +40,9 @@ final class DisplaySyncService {
         self.builtInBrightnessProvider = builtInBrightnessProvider
         self.topologyService = topologyService
         self.peerService = peerService
+        peerService.profilePreparingHandler = { [weak self] _ in
+            self?.topologyService.captureCurrentLayoutIfHealthy()
+        }
         peerService.profileCommittedHandler = { [weak self] profile in
             await self?.applyRemoteProfile(profile)
         }
@@ -170,7 +173,7 @@ final class DisplaySyncService {
         }
 
         guard Date() >= topologyCooldownUntil,
-              activeProfileID != nil || activeRemoteProfile != nil
+              activeProfileID != nil || activeRemoteWireProfile != nil
         else { return }
         topologyDebounceTask?.cancel()
         topologyDebounceTask = Task { [weak self] in
@@ -390,7 +393,7 @@ final class DisplaySyncService {
 
         if profile.coordinationMode == .restore {
             activeProfileID = profile.id
-            activeRemoteProfile = nil
+            activeRemoteWireProfile = nil
             let restored = applyTopology(profile)
             statusHandler?(restored ? "\(profile.name) restored" : "\(profile.name): no matching displays")
             if restored { lastSuccessfulLocalProfileID = profile.id }
@@ -418,7 +421,7 @@ final class DisplaySyncService {
         }
 
         activeProfileID = profile.id
-        activeRemoteProfile = nil
+        activeRemoteWireProfile = nil
         applyTopology(profile)
 
         let inputResult = await switchInputs(for: profile)
@@ -522,7 +525,7 @@ final class DisplaySyncService {
 
     private func restorePreviousProfile(_ profile: DisplaySwitchingProfile) async -> [String] {
         activeProfileID = profile.id
-        activeRemoteProfile = nil
+        activeRemoteWireProfile = nil
         if profile.coordinationMode == .restore {
             return applyTopology(profile) ? [] : ["Local layout restore failed"]
         }
@@ -535,8 +538,10 @@ final class DisplaySyncService {
     }
 
     private func applyActiveTopology() {
-        if let activeRemoteProfile {
-            applyTopology(activeRemoteProfile)
+        if let activeRemoteWireProfile {
+            let resolved = resolvedRemoteProfile(activeRemoteWireProfile)
+            guard resolved.isComplete else { return }
+            applyTopology(resolved.profile)
             return
         }
 
@@ -642,6 +647,7 @@ final class DisplaySyncService {
                 name: profile.name,
                 coordinationMode: profile.coordinationMode,
                 managedTarget: .windows,
+                restorePeerLayout: nil,
                 monitors: actions
             )
         }
@@ -664,6 +670,7 @@ final class DisplaySyncService {
             name: profile.name,
             coordinationMode: profile.coordinationMode,
             managedTarget: .windows,
+            restorePeerLayout: profile.coordinationMode == .managed ? profile.restorePeerLayout : nil,
             monitors: actions
         )
     }
@@ -673,9 +680,39 @@ final class DisplaySyncService {
     }
 
     private func applyRemoteProfile(_ wireProfile: WireProfile) async {
-        await reconcileDisplays()
+        activeProfileID = nil
+        lastSuccessfulLocalProfileID = nil
+        guard wireProfile.coordinationMode != .managed || wireProfile.restorePeerLayout != false else {
+            activeRemoteWireProfile = nil
+            statusHandler?("\(wireProfile.name) received · layout unchanged")
+            return
+        }
+
+        activeRemoteWireProfile = wireProfile
+        for attempt in 0 ..< 3 {
+            await reconcileDisplays()
+            let resolved = resolvedRemoteProfile(wireProfile)
+            if resolved.isComplete, applyTopology(resolved.profile) {
+                statusHandler?("\(wireProfile.name) applied")
+                return
+            }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 700_000_000)
+            }
+        }
+        statusHandler?("\(wireProfile.name) waiting for displays")
+    }
+
+    /// Keep the wire actions until every display has physically returned. A
+    /// profile committed during the DDC transition may initially match only a
+    /// subset; display reconfiguration events resolve it again from Pairing ID.
+    private func resolvedRemoteProfile(
+        _ wireProfile: WireProfile
+    ) -> (profile: DisplaySwitchingProfile, isComplete: Bool) {
         let localIDBySharedID = Dictionary(
-            sessions.values.map { (networkIdentity(for: $0).lowercased(), $0.id) },
+            sessions.values
+                .filter { $0.isConnected && $0.target != nil }
+                .map { (networkIdentity(for: $0).lowercased(), $0.id) },
             uniquingKeysWith: { first, _ in first }
         )
         var profile = DisplaySwitchingProfile(
@@ -683,20 +720,18 @@ final class DisplaySyncService {
             name: wireProfile.name,
             coordinationMode: wireProfile.coordinationMode
         )
+        var expectedBehaviorCount = 0
+        var matchedBehaviorCount = 0
 
         for action in wireProfile.monitors {
-            guard let localID = localIDBySharedID[action.sharedID.lowercased()],
-                  let behavior = MacDisplayBehavior(rawValue: action.macBehavior),
-                  behavior != .unchanged
-            else { continue }
+            guard let behavior = MacDisplayBehavior(rawValue: action.macBehavior),
+                  behavior != .unchanged else { continue }
+            expectedBehaviorCount += 1
+            guard let localID = localIDBySharedID[action.sharedID.lowercased()] else { continue }
             profile.macDisplayBehaviors[localID] = behavior
+            matchedBehaviorCount += 1
         }
-
-        activeProfileID = nil
-        lastSuccessfulLocalProfileID = nil
-        activeRemoteProfile = profile
-        applyTopology(profile)
-        statusHandler?("\(profile.name) applied")
+        return (profile, expectedBehaviorCount > 0 && matchedBehaviorCount == expectedBehaviorCount)
     }
 
     private func networkIdentity(for session: ManagedDisplaySession) -> String {

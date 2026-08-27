@@ -40,6 +40,11 @@ Restore Layout profiles are never serialized onto this protocol. They store a
 host-local monitor set and Primary, then restore the local Primary/Extended
 topology without DDC input commands or peer discovery/transactions.
 
+Managed profiles may set `restorePeerLayout`. When true (and for older payloads
+where the field is absent), the receiving peer reapplies its requested display
+topology after the physical inputs arrive. When false, the peer acknowledges the
+transaction without changing its local display topology.
+
 Messages are newline-delimited UTF-8 JSON over TCP. Discovery uses a short LAN
 multicast probe at launch, on demand, or after the user requests Rescan. A peer
 answers once and the endpoint is cached for direct commands. As soon as either

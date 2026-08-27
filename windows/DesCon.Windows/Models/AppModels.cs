@@ -53,6 +53,7 @@ public sealed class SwitchingProfile
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "Profile";
     public ProfileCoordinationMode CoordinationMode { get; set; } = ProfileCoordinationMode.Managed;
+    public bool RestorePeerLayout { get; set; } = true;
     public string SelfPrimaryMonitorId { get; set; } = "";
     public string PeerPrimaryMonitorId { get; set; } = "";
     public string LayoutPrimaryMonitorId { get; set; } = "";

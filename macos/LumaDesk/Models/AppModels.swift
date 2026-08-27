@@ -723,6 +723,7 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
     var id: UUID = UUID()
     var name: String
     var coordinationMode: ProfileCoordinationMode = .managed
+    var restorePeerLayout: Bool = true
     var selfPrimaryMonitorID: String = ""
     var peerPrimaryMonitorID: String = ""
     var layoutPrimaryMonitorID: String = ""
@@ -737,6 +738,7 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         case id
         case name
         case coordinationMode
+        case restorePeerLayout
         case selfPrimaryMonitorID
         case peerPrimaryMonitorID
         case layoutPrimaryMonitorID
@@ -752,6 +754,7 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         id: UUID = UUID(),
         name: String,
         coordinationMode: ProfileCoordinationMode = .managed,
+        restorePeerLayout: Bool = true,
         selfPrimaryMonitorID: String = "",
         peerPrimaryMonitorID: String = "",
         layoutPrimaryMonitorID: String = "",
@@ -765,6 +768,7 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         self.id = id
         self.name = name
         self.coordinationMode = coordinationMode
+        self.restorePeerLayout = restorePeerLayout
         self.selfPrimaryMonitorID = selfPrimaryMonitorID
         self.peerPrimaryMonitorID = peerPrimaryMonitorID
         self.layoutPrimaryMonitorID = layoutPrimaryMonitorID
@@ -783,6 +787,7 @@ struct DisplaySwitchingProfile: Codable, Equatable, Identifiable {
         // Existing profiles were intentionally one-way. Preserve that behavior
         // until the user explicitly opts a profile into Mac + Windows handshakes.
         coordinationMode = try container.decodeIfPresent(ProfileCoordinationMode.self, forKey: .coordinationMode) ?? .external
+        restorePeerLayout = try container.decodeIfPresent(Bool.self, forKey: .restorePeerLayout) ?? true
         selfPrimaryMonitorID = try container.decodeIfPresent(String.self, forKey: .selfPrimaryMonitorID) ?? ""
         peerPrimaryMonitorID = try container.decodeIfPresent(String.self, forKey: .peerPrimaryMonitorID)
             ?? selfPrimaryMonitorID

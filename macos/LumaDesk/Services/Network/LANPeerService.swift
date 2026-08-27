@@ -14,12 +14,14 @@ struct WireProfile: Codable, Equatable {
     var name: String
     var coordinationMode: ProfileCoordinationMode
     var managedTarget: ManagedProfileTarget
+    var restorePeerLayout: Bool?
     var monitors: [WireMonitorAction]
 }
 
 @MainActor
 final class LANPeerService {
     var statusHandler: ((String) -> Void)?
+    var profilePreparingHandler: ((WireProfile) async -> Void)?
     var profileCommittedHandler: ((WireProfile) async -> Void)?
 
     private let queue = DispatchQueue(label: "DesCon.LANPeer")
@@ -221,6 +223,7 @@ final class LANPeerService {
             else {
                 return PeerResponse(ok: false, detail: "This profile does not target Mac.")
             }
+            await profilePreparingHandler?(prepare.profile)
             pendingProfiles[prepare.transactionID] = prepare.profile
             return PeerResponse(ok: true, detail: "Ready")
         case "commit":

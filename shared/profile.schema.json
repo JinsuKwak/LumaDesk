@@ -40,6 +40,7 @@
         "id": { "type": "string", "format": "uuid" },
         "name": { "type": "string", "minLength": 1 },
         "coordinationMode": { "enum": ["managed", "self", "restore", "external"] },
+        "restorePeerLayout": { "type": "boolean", "default": true },
         "selfPrimaryMonitorID": { "type": "string" },
         "peerPrimaryMonitorID": { "type": "string" },
         "layoutPrimaryMonitorID": { "type": "string" },

@@ -215,6 +215,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
     private string _name;
     private ProfileCoordinationMode _coordinationMode;
     private bool _isFavorite;
+    private bool _restorePeerLayout;
     private string _hotKeyText;
     private WindowsGlobalHotKey? _windowsHotKey;
     private ProfilePrimaryMonitorOption? _selfPrimaryMonitor;
@@ -228,6 +229,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
         _name = model.Name;
         _coordinationMode = model.CoordinationMode;
         _isFavorite = favoriteID == model.Id;
+        _restorePeerLayout = model.RestorePeerLayout;
         _windowsHotKey = model.WindowsHotKey;
         _hotKeyText = model.WindowsHotKey?.DisplayText ?? "Set shortcut";
         Monitors = new ObservableCollection<ProfileMonitorRowViewModel>(monitorList.Select(item => new ProfileMonitorRowViewModel(item, model)));
@@ -269,6 +271,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
         {
             if (!Set(ref _coordinationMode, value)) return;
             Changed(nameof(IsExternal));
+            Changed(nameof(IsManaged));
             Changed(nameof(IsSelf));
             Changed(nameof(IsRestore));
             Changed(nameof(IsPrimaryMode));
@@ -295,6 +298,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
         }
     }
     public bool IsExternal => CoordinationMode == ProfileCoordinationMode.External;
+    public bool IsManaged => CoordinationMode == ProfileCoordinationMode.Managed;
     public bool IsSelf => CoordinationMode == ProfileCoordinationMode.Self;
     public bool IsRestore => CoordinationMode == ProfileCoordinationMode.Restore;
     public bool IsPrimaryMode => IsSelf || IsRestore;
@@ -347,6 +351,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
         }
     }
     public string FavoriteGlyph => IsFavorite ? "★" : "☆";
+    public bool RestorePeerLayout { get => _restorePeerLayout; set => Set(ref _restorePeerLayout, value); }
     public string HotKeyText { get => _hotKeyText; set => Set(ref _hotKeyText, value); }
     public Array CoordinationModes => Enum.GetValues<ProfileCoordinationMode>();
     public ObservableCollection<ProfileMonitorRowViewModel> Monitors { get; }
@@ -415,6 +420,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
 
         Model.Name = Name.Trim();
         Model.CoordinationMode = CoordinationMode;
+        Model.RestorePeerLayout = RestorePeerLayout;
         foreach (var row in Monitors)
             if (!row.Apply(Model, out error)) return false;
         Model.SelfPrimaryMonitorId = SelfPrimaryMonitor?.Id ?? "";

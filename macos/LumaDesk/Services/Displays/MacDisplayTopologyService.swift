@@ -43,7 +43,7 @@ final class MacDisplayTopologyService {
             behavior == .mirrorPrimary || behavior == .handedOff
         }
         if foldsDesktop {
-            captureCurrentExtendedLayout()
+            captureCurrentLayoutIfHealthy()
         }
 
         let handedOffIDs = Set(behaviors.compactMap { $0.1 == .handedOff ? $0.0 : nil })
@@ -103,7 +103,7 @@ final class MacDisplayTopologyService {
     /// healthy extended arrangement before a Handed Off/Mirror profile does so.
     /// The active UUID set is part of the key, keeping docked, undocked, and
     /// clamshell layouts independent from one another.
-    private func captureCurrentExtendedLayout() {
+    func captureCurrentLayoutIfHealthy() {
         let displays = activeDisplays()
         guard !displays.isEmpty,
               displays.allSatisfy({ CGDisplayMirrorsDisplay($0.id) == kCGNullDirectDisplay })

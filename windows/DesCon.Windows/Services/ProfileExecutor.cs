@@ -151,6 +151,13 @@ public sealed class ProfileExecutor
         try
         {
             StatusChanged?.Invoke($"Applying {wireProfile.Name} from Mac…");
+            if (wireProfile.CoordinationMode == ProfileCoordinationMode.Managed &&
+                wireProfile.RestorePeerLayout == false)
+            {
+                StatusChanged?.Invoke($"{wireProfile.Name} received · layout unchanged");
+                return;
+            }
+
             await Task.Delay(900);
             var monitors = _settings().Monitors
                 .Where(item => !string.IsNullOrWhiteSpace(item.NetworkIdentity))

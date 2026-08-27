@@ -512,6 +512,7 @@ public sealed record WireProfile(
     string Name,
     ProfileCoordinationMode CoordinationMode,
     ManagedProfileTarget ManagedTarget,
+    bool? RestorePeerLayout,
     IReadOnlyList<WireMonitorAction> Monitors)
 {
     public static WireProfile From(SwitchingProfile profile, IReadOnlyCollection<MonitorDefinition> monitors)
@@ -545,7 +546,7 @@ public sealed record WireProfile(
                     item == peerPrimary ? MacDisplayBehavior.Primary : MacDisplayBehavior.HandedOff,
                     item == selfPrimary ? WindowsDisplayBehavior.Primary : WindowsDisplayBehavior.Extended))
                 .ToList();
-            return new WireProfile(profile.Id, profile.Name, profile.CoordinationMode, ManagedProfileTarget.MacOS, selfActions);
+            return new WireProfile(profile.Id, profile.Name, profile.CoordinationMode, ManagedProfileTarget.MacOS, null, selfActions);
         }
 
         var actions = new List<WireMonitorAction>();
@@ -563,6 +564,12 @@ public sealed record WireProfile(
             if (input is null && mac == MacDisplayBehavior.Unchanged && windows == WindowsDisplayBehavior.Unchanged) continue;
             actions.Add(new WireMonitorAction(monitor.NetworkIdentity, input, mac, windows));
         }
-        return new WireProfile(profile.Id, profile.Name, profile.CoordinationMode, ManagedProfileTarget.MacOS, actions);
+        return new WireProfile(
+            profile.Id,
+            profile.Name,
+            profile.CoordinationMode,
+            ManagedProfileTarget.MacOS,
+            profile.CoordinationMode == ProfileCoordinationMode.Managed ? profile.RestorePeerLayout : null,
+            actions);
     }
 }

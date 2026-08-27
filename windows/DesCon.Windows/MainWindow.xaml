@@ -332,6 +332,22 @@
                                                 </StackPanel>
                                             </Grid>
 
+                                            <CheckBox Content="Restore Mac layout after handoff"
+                                                      IsChecked="{Binding RestorePeerLayout}"
+                                                      Margin="38,0,0,8" FontSize="11"
+                                                      ToolTip="After DDC switches the inputs, ask the Mac to restore its requested Primary/Extended layout.">
+                                                <CheckBox.Style>
+                                                    <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                        <Setter Property="Visibility" Value="Collapsed" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsManaged}" Value="True">
+                                                                <Setter Property="Visibility" Value="Visible" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </CheckBox.Style>
+                                            </CheckBox>
+
                                             <Grid Margin="38,0,0,8">
                                                 <Grid.Style>
                                                     <Style TargetType="Grid">
