@@ -2,7 +2,7 @@ namespace DesCon.Windows.Models;
 
 public enum AppTheme { System, Light, Dark }
 
-public enum ProfileCoordinationMode { Managed, Self, External }
+public enum ProfileCoordinationMode { Managed, Self, Restore, External }
 
 public enum ManagedProfileTarget { MacOS, Windows }
 
@@ -55,6 +55,8 @@ public sealed class SwitchingProfile
     public ProfileCoordinationMode CoordinationMode { get; set; } = ProfileCoordinationMode.Managed;
     public string SelfPrimaryMonitorId { get; set; } = "";
     public string PeerPrimaryMonitorId { get; set; } = "";
+    public string LayoutPrimaryMonitorId { get; set; } = "";
+    public List<string> LayoutMonitorIds { get; set; } = [];
     public Dictionary<string, ushort> InputAssignments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, MacDisplayBehavior> MacDisplayBehaviors { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, WindowsDisplayBehavior> WindowsDisplayBehaviors { get; set; } = new(StringComparer.OrdinalIgnoreCase);

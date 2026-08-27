@@ -9,6 +9,8 @@ Native Windows 10/11 tray client for DesCon switching profiles.
 - Standard DXVA2 DDC plus NVIDIA raw I²C for custom LG packet-source commands
 - Managed Mac/Windows LAN transactions, symmetric This Device profiles, and
   one-way named external profiles
+- Local Restore Layout profiles which re-enable Primary/Extended paths without
+  DDC input commands or LAN traffic
 - Reversible session-only display disable, extended restore, primary selection,
   and clone topology
 

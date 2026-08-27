@@ -78,23 +78,34 @@ public sealed class MonitorEditorViewModel : ObservableModel
 public sealed class ProfileMonitorRowViewModel : ObservableModel
 {
     private bool _isIncluded;
+    private bool _inputIncluded;
+    private bool _layoutIncluded;
+    private bool _isLayoutMode;
     private string _input;
     private MacDisplayBehavior _macBehavior;
     private WindowsDisplayBehavior _behavior;
     private bool _showMacBehavior;
     private bool _showBehaviorControls;
+    private bool _showInputControls;
 
     public string MonitorID => _monitor.Id;
     public string ProfileKey => StorageKey;
     private string StorageKey => _monitor.ProfileStorageKey;
     private readonly MonitorDefinition _monitor;
+    private readonly string _initialStorageKey;
 
     public ProfileMonitorRowViewModel(MonitorDefinition monitor, SwitchingProfile profile)
     {
         _monitor = monitor;
-        _isIncluded = profile.InputAssignments.TryGetValue(StorageKey, out var value)
+        _initialStorageKey = monitor.ProfileStorageKey;
+        _inputIncluded = profile.InputAssignments.TryGetValue(StorageKey, out var value)
             || profile.InputAssignments.TryGetValue(monitor.Id, out value);
-        _input = (_isIncluded ? value : (ushort)0).ToString("X4");
+        _layoutIncluded = profile.LayoutMonitorIds.Any(item =>
+            string.Equals(item, StorageKey, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(item, monitor.Id, StringComparison.OrdinalIgnoreCase));
+        _isLayoutMode = profile.CoordinationMode == ProfileCoordinationMode.Restore;
+        _isIncluded = _isLayoutMode ? _layoutIncluded : _inputIncluded;
+        _input = (_inputIncluded ? value : (ushort)0).ToString("X4");
         _macBehavior = profile.MacDisplayBehaviors.GetValueOrDefault(
             StorageKey,
             profile.MacDisplayBehaviors.GetValueOrDefault(monitor.Id, MacDisplayBehavior.Unchanged));
@@ -102,38 +113,66 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
             StorageKey,
             profile.WindowsDisplayBehaviors.GetValueOrDefault(monitor.Id, WindowsDisplayBehavior.Unchanged));
         _showMacBehavior = profile.CoordinationMode == ProfileCoordinationMode.Managed;
-        _showBehaviorControls = profile.CoordinationMode != ProfileCoordinationMode.Self;
+        _showBehaviorControls = profile.CoordinationMode is not ProfileCoordinationMode.Self
+            and not ProfileCoordinationMode.Restore;
+        _showInputControls = !_isLayoutMode;
     }
 
-    public bool IsIncluded { get => _isIncluded; set => Set(ref _isIncluded, value); }
+    public bool IsIncluded
+    {
+        get => _isIncluded;
+        set
+        {
+            if (!Set(ref _isIncluded, value)) return;
+            if (_isLayoutMode) _layoutIncluded = value;
+            else _inputIncluded = value;
+        }
+    }
     public string Label => $"{_monitor.DisplayLabel} · {_monitor.Name}";
     public string Input { get => _input; set => Set(ref _input, value.ToUpperInvariant()); }
     public MacDisplayBehavior MacBehavior { get => _macBehavior; set => Set(ref _macBehavior, value); }
     public WindowsDisplayBehavior Behavior { get => _behavior; set => Set(ref _behavior, value); }
     public bool ShowMacBehavior { get => _showMacBehavior; set => Set(ref _showMacBehavior, value); }
     public bool ShowBehaviorControls { get => _showBehaviorControls; set => Set(ref _showBehaviorControls, value); }
+    public bool ShowInputControls { get => _showInputControls; set => Set(ref _showInputControls, value); }
     public Array MacBehaviors => Enum.GetValues<MacDisplayBehavior>();
     public Array Behaviors => Enum.GetValues<WindowsDisplayBehavior>();
 
     public void Refresh() => Changed(nameof(Label));
 
+    public void SetCoordinationMode(ProfileCoordinationMode mode)
+    {
+        _isLayoutMode = mode == ProfileCoordinationMode.Restore;
+        IsIncluded = _isLayoutMode ? _layoutIncluded : _inputIncluded;
+        ShowMacBehavior = mode == ProfileCoordinationMode.Managed;
+        ShowBehaviorControls = mode is not ProfileCoordinationMode.Self
+            and not ProfileCoordinationMode.Restore;
+        ShowInputControls = !_isLayoutMode;
+    }
+
     public bool Apply(SwitchingProfile profile, out string error)
     {
         error = "";
-        if (IsIncluded)
+        ushort input = 0;
+        if (_inputIncluded)
         {
-            if (!ushort.TryParse(Input, System.Globalization.NumberStyles.HexNumber, null, out var input))
+            if (!ushort.TryParse(Input, System.Globalization.NumberStyles.HexNumber, null, out input))
             {
                 error = $"{Label}: Input must be a four-digit hexadecimal value.";
                 return false;
             }
-            profile.InputAssignments[StorageKey] = input;
         }
-        else
-        {
-            profile.InputAssignments.Remove(StorageKey);
-        }
+
+        profile.InputAssignments.Remove(StorageKey);
+        profile.InputAssignments.Remove(_initialStorageKey);
         if (!string.Equals(StorageKey, MonitorID, StringComparison.OrdinalIgnoreCase)) profile.InputAssignments.Remove(MonitorID);
+        if (_inputIncluded) profile.InputAssignments[StorageKey] = input;
+
+        profile.LayoutMonitorIds.RemoveAll(item =>
+            string.Equals(item, StorageKey, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(item, _initialStorageKey, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(item, MonitorID, StringComparison.OrdinalIgnoreCase));
+        if (_layoutIncluded) profile.LayoutMonitorIds.Add(StorageKey);
 
         if (MacBehavior == MacDisplayBehavior.Unchanged) profile.MacDisplayBehaviors.Remove(StorageKey);
         else profile.MacDisplayBehaviors[StorageKey] = MacBehavior;
@@ -143,6 +182,11 @@ public sealed class ProfileMonitorRowViewModel : ObservableModel
         {
             profile.MacDisplayBehaviors.Remove(MonitorID);
             profile.WindowsDisplayBehaviors.Remove(MonitorID);
+        }
+        if (!string.Equals(_initialStorageKey, StorageKey, StringComparison.OrdinalIgnoreCase))
+        {
+            profile.MacDisplayBehaviors.Remove(_initialStorageKey);
+            profile.WindowsDisplayBehaviors.Remove(_initialStorageKey);
         }
         return true;
     }
@@ -174,6 +218,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
     private string _hotKeyText;
     private ProfilePrimaryMonitorOption? _selfPrimaryMonitor;
     private ProfilePrimaryMonitorOption? _peerPrimaryMonitor;
+    private ProfilePrimaryMonitorOption? _layoutPrimaryMonitor;
 
     public ProfileEditorViewModel(SwitchingProfile model, IEnumerable<MonitorDefinition> monitors, Guid? favoriteID)
     {
@@ -192,6 +237,9 @@ public sealed class ProfileEditorViewModel : ObservableModel
         _peerPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
             string.Equals(item.Id, model.PeerPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(item.LocalId, model.PeerPrimaryMonitorId, StringComparison.OrdinalIgnoreCase));
+        _layoutPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
+            string.Equals(item.Id, model.LayoutPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(item.LocalId, model.LayoutPrimaryMonitorId, StringComparison.OrdinalIgnoreCase));
         if (_coordinationMode == ProfileCoordinationMode.Self && _selfPrimaryMonitor is null)
         {
             var firstIncluded = Monitors.FirstOrDefault(item => item.IsIncluded)?.ProfileKey;
@@ -201,6 +249,13 @@ public sealed class ProfileEditorViewModel : ObservableModel
         }
         if (_coordinationMode == ProfileCoordinationMode.Self && _peerPrimaryMonitor is null)
             _peerPrimaryMonitor = _selfPrimaryMonitor;
+        if (_coordinationMode == ProfileCoordinationMode.Restore && _layoutPrimaryMonitor is null)
+        {
+            var firstIncluded = Monitors.FirstOrDefault(item => item.IsIncluded)?.ProfileKey;
+            _layoutPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
+                string.Equals(item.Id, firstIncluded, StringComparison.OrdinalIgnoreCase))
+                ?? PrimaryMonitorOptions.FirstOrDefault();
+        }
     }
 
     public Guid Id => Model.Id;
@@ -213,12 +268,12 @@ public sealed class ProfileEditorViewModel : ObservableModel
             if (!Set(ref _coordinationMode, value)) return;
             Changed(nameof(IsExternal));
             Changed(nameof(IsSelf));
+            Changed(nameof(IsRestore));
+            Changed(nameof(IsPrimaryMode));
+            Changed(nameof(ShowPeerPrimary));
+            Changed(nameof(ActivePrimaryMonitor));
             Changed(nameof(DirectionLabel));
-            foreach (var monitor in Monitors)
-            {
-                monitor.ShowMacBehavior = value == ProfileCoordinationMode.Managed;
-                monitor.ShowBehaviorControls = value != ProfileCoordinationMode.Self;
-            }
+            foreach (var monitor in Monitors) monitor.SetCoordinationMode(value);
             if (value == ProfileCoordinationMode.Self && SelfPrimaryMonitor is null)
             {
                 var firstIncluded = Monitors.FirstOrDefault(item => item.IsIncluded)?.ProfileKey;
@@ -228,25 +283,58 @@ public sealed class ProfileEditorViewModel : ObservableModel
             }
             if (value == ProfileCoordinationMode.Self && PeerPrimaryMonitor is null)
                 PeerPrimaryMonitor = SelfPrimaryMonitor;
+            if (value == ProfileCoordinationMode.Restore && LayoutPrimaryMonitor is null)
+            {
+                var firstIncluded = Monitors.FirstOrDefault(item => item.IsIncluded)?.ProfileKey;
+                LayoutPrimaryMonitor = PrimaryMonitorOptions.FirstOrDefault(item =>
+                    string.Equals(item.Id, firstIncluded, StringComparison.OrdinalIgnoreCase))
+                    ?? PrimaryMonitorOptions.FirstOrDefault();
+            }
         }
     }
     public bool IsExternal => CoordinationMode == ProfileCoordinationMode.External;
     public bool IsSelf => CoordinationMode == ProfileCoordinationMode.Self;
+    public bool IsRestore => CoordinationMode == ProfileCoordinationMode.Restore;
+    public bool IsPrimaryMode => IsSelf || IsRestore;
+    public bool ShowPeerPrimary => IsSelf;
     public string DirectionLabel => CoordinationMode switch
     {
         ProfileCoordinationMode.External => "One-way DDC",
         ProfileCoordinationMode.Self => "All assigned monitors → this PC",
+        ProfileCoordinationMode.Restore => "Local Primary + Extended only",
         _ => "Windows → Mac"
     };
     public ProfilePrimaryMonitorOption? SelfPrimaryMonitor
     {
         get => _selfPrimaryMonitor;
-        set => Set(ref _selfPrimaryMonitor, value);
+        set
+        {
+            if (Set(ref _selfPrimaryMonitor, value) && IsSelf)
+                Changed(nameof(ActivePrimaryMonitor));
+        }
     }
     public ProfilePrimaryMonitorOption? PeerPrimaryMonitor
     {
         get => _peerPrimaryMonitor;
         set => Set(ref _peerPrimaryMonitor, value);
+    }
+    public ProfilePrimaryMonitorOption? LayoutPrimaryMonitor
+    {
+        get => _layoutPrimaryMonitor;
+        set
+        {
+            if (Set(ref _layoutPrimaryMonitor, value) && IsRestore)
+                Changed(nameof(ActivePrimaryMonitor));
+        }
+    }
+    public ProfilePrimaryMonitorOption? ActivePrimaryMonitor
+    {
+        get => IsRestore ? LayoutPrimaryMonitor : SelfPrimaryMonitor;
+        set
+        {
+            if (IsRestore) LayoutPrimaryMonitor = value;
+            else SelfPrimaryMonitor = value;
+        }
     }
     public bool IsFavorite
     {
@@ -267,11 +355,8 @@ public sealed class ProfileEditorViewModel : ObservableModel
         var existing = Monitors.FirstOrDefault(item => string.Equals(item.MonitorID, monitor.Id, StringComparison.OrdinalIgnoreCase));
         if (existing is null)
         {
-            var row = new ProfileMonitorRowViewModel(monitor, Model)
-            {
-                ShowMacBehavior = CoordinationMode == ProfileCoordinationMode.Managed,
-                ShowBehaviorControls = CoordinationMode != ProfileCoordinationMode.Self
-            };
+            var row = new ProfileMonitorRowViewModel(monitor, Model);
+            row.SetCoordinationMode(CoordinationMode);
             Monitors.Add(row);
             PrimaryMonitorOptions.Add(new ProfilePrimaryMonitorOption(monitor));
         }
@@ -300,6 +385,19 @@ public sealed class ProfileEditorViewModel : ObservableModel
                 return false;
             }
         }
+        if (CoordinationMode == ProfileCoordinationMode.Restore)
+        {
+            if (!Monitors.Any(item => item.IsIncluded))
+            {
+                error = $"{Name}: select at least one monitor to restore.";
+                return false;
+            }
+            if (!IsIncluded(LayoutPrimaryMonitor))
+            {
+                error = $"{Name}: restore primary must be one of the enabled monitors.";
+                return false;
+            }
+        }
 
         Model.Name = Name.Trim();
         Model.CoordinationMode = CoordinationMode;
@@ -307,6 +405,7 @@ public sealed class ProfileEditorViewModel : ObservableModel
             if (!row.Apply(Model, out error)) return false;
         Model.SelfPrimaryMonitorId = SelfPrimaryMonitor?.Id ?? "";
         Model.PeerPrimaryMonitorId = PeerPrimaryMonitor?.Id ?? Model.SelfPrimaryMonitorId;
+        Model.LayoutPrimaryMonitorId = LayoutPrimaryMonitor?.Id ?? "";
         return true;
     }
 

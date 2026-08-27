@@ -10,6 +10,8 @@ shared/    profile schema and authenticated LAN protocol
 
 Managed profiles coordinate Mac and Windows directly over the local network with multicast discovery, HMAC-authenticated TCP commands, and a prepare/commit transaction. External profiles (Jetson, consoles, or any renamed target) send DDC unilaterally and never require a peer app.
 
+Restore Layout profiles are local recovery actions. They choose one assigned monitor as Primary and restore the remaining assigned monitors as Extended without sending DDC input commands or contacting a LAN peer.
+
 Both clients offer System, Light, and Dark appearance modes while retaining
 native translucent materials. Profiles are available from the macOS menu bar or
 Windows notification area and can also be assigned global shortcuts. Monitor

@@ -312,6 +312,9 @@
                                                                             <DataTrigger Binding="{Binding}" Value="{x:Static models:ProfileCoordinationMode.Self}">
                                                                                 <Setter Property="Text" Value="This Device" />
                                                                             </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding}" Value="{x:Static models:ProfileCoordinationMode.Restore}">
+                                                                                <Setter Property="Text" Value="Restore Layout" />
+                                                                            </DataTrigger>
                                                                             <DataTrigger Binding="{Binding}" Value="{x:Static models:ProfileCoordinationMode.External}">
                                                                                 <Setter Property="Text" Value="External device" />
                                                                             </DataTrigger>
@@ -333,7 +336,7 @@
                                                     <Style TargetType="Grid">
                                                         <Setter Property="Visibility" Value="Collapsed" />
                                                         <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding IsSelf}" Value="True">
+                                                            <DataTrigger Binding="{Binding IsPrimaryMode}" Value="True">
                                                                 <Setter Property="Visibility" Value="Visible" />
                                                             </DataTrigger>
                                                         </Style.Triggers>
@@ -347,16 +350,27 @@
                                                     <ColumnDefinition Width="145" />
                                                     <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
-                                                <TextBlock Text="This PC primary" VerticalAlignment="Center" Margin="0,0,7,0"
+                                                <TextBlock Text="Primary" VerticalAlignment="Center" Margin="0,0,7,0"
                                                            Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
                                                 <ComboBox Grid.Column="1" ItemsSource="{Binding PrimaryMonitorOptions}"
-                                                          SelectedItem="{Binding SelfPrimaryMonitor}" DisplayMemberPath="Label"
+                                                          SelectedItem="{Binding ActivePrimaryMonitor}" DisplayMemberPath="Label"
                                                           Padding="6,1" MinHeight="25" />
-                                                <TextBlock Grid.Column="3" Text="Peer fallback" VerticalAlignment="Center" Margin="0,0,7,0"
-                                                           Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
-                                                <ComboBox Grid.Column="4" ItemsSource="{Binding PrimaryMonitorOptions}"
-                                                          SelectedItem="{Binding PeerPrimaryMonitor}" DisplayMemberPath="Label"
-                                                          Padding="6,1" MinHeight="25" />
+                                                <StackPanel Grid.Column="3" Grid.ColumnSpan="2" Orientation="Horizontal">
+                                                    <StackPanel.Style>
+                                                        <Style TargetType="StackPanel">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding ShowPeerPrimary}" Value="False">
+                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </StackPanel.Style>
+                                                    <TextBlock Text="Peer fallback" VerticalAlignment="Center" Margin="0,0,7,0"
+                                                               Foreground="{DynamicResource SecondaryTextBrush}" FontSize="11" />
+                                                    <ComboBox Width="145" ItemsSource="{Binding PrimaryMonitorOptions}"
+                                                              SelectedItem="{Binding PeerPrimaryMonitor}" DisplayMemberPath="Label"
+                                                              Padding="6,1" MinHeight="25" />
+                                                </StackPanel>
                                             </Grid>
 
                                             <ItemsControl ItemsSource="{Binding Monitors}" Margin="38,0,0,0">
@@ -373,9 +387,29 @@
                                                                 </Grid.ColumnDefinitions>
                                                                 <CheckBox IsChecked="{Binding IsIncluded}" VerticalAlignment="Center" />
                                                                 <TextBlock Grid.Column="1" Text="{Binding Label}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="12" />
-                                                                <TextBlock Grid.Column="2" Text="Input" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="11" />
+                                                                <TextBlock Grid.Column="2" Text="Input" Foreground="{DynamicResource SecondaryTextBrush}" VerticalAlignment="Center" FontSize="11">
+                                                                    <TextBlock.Style>
+                                                                        <Style TargetType="TextBlock">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding ShowInputControls}" Value="False">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBlock.Style>
+                                                                </TextBlock>
                                                                 <TextBox Grid.Column="3" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" MaxLength="4" TextAlignment="Center"
-                                                                         Padding="4,1" MinHeight="25" />
+                                                                         Padding="4,1" MinHeight="25">
+                                                                    <TextBox.Style>
+                                                                        <Style TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+                                                                            <Style.Triggers>
+                                                                                <DataTrigger Binding="{Binding ShowInputControls}" Value="False">
+                                                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                                                </DataTrigger>
+                                                                            </Style.Triggers>
+                                                                        </Style>
+                                                                    </TextBox.Style>
+                                                                </TextBox>
 
                                                                 <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal"
                                                                             HorizontalAlignment="Right" Margin="0,5,0,0">

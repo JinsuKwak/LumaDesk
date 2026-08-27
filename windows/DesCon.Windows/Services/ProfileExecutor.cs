@@ -45,6 +45,21 @@ public sealed class ProfileExecutor
             var errors = new List<string>();
             Guid? transactionID = null;
 
+            if (profile.CoordinationMode == ProfileCoordinationMode.Restore)
+            {
+                await RecoverActiveBehaviorsAsync(windowsActions, errors);
+                if (errors.Count == 0)
+                {
+                    _lastSuccessfulLocalProfileID = profile.Id;
+                    StatusChanged?.Invoke($"{profile.Name} restored");
+                }
+                else
+                {
+                    StatusChanged?.Invoke($"{profile.Name}: {string.Join(" · ", errors.Distinct())}");
+                }
+                return;
+            }
+
             if (RequiresPeer(profile.CoordinationMode))
             {
                 var preparation = await _peer.PrepareAsync(profile);
@@ -168,18 +183,24 @@ public sealed class ProfileExecutor
         SwitchingProfile profile,
         IReadOnlyDictionary<string, MonitorDefinition> monitors)
     {
-        if (profile.CoordinationMode == ProfileCoordinationMode.Self)
+        if (profile.CoordinationMode is ProfileCoordinationMode.Self or ProfileCoordinationMode.Restore)
         {
-            var includedMonitors = profile.InputAssignments.Keys
+            IEnumerable<string> includedIDs = profile.CoordinationMode == ProfileCoordinationMode.Restore
+                ? profile.LayoutMonitorIds
+                : profile.InputAssignments.Keys;
+            var includedMonitors = includedIDs
                 .Where(monitors.ContainsKey)
                 .Select(key => monitors[key])
                 .GroupBy(monitor => monitor.Id, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .OrderBy(monitor => monitor.DisplayNumber)
                 .ToList();
+            var primaryID = profile.CoordinationMode == ProfileCoordinationMode.Restore
+                ? profile.LayoutPrimaryMonitorId
+                : profile.SelfPrimaryMonitorId;
             var primary = includedMonitors.FirstOrDefault(monitor =>
-                    string.Equals(monitor.ProfileStorageKey, profile.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(monitor.Id, profile.SelfPrimaryMonitorId, StringComparison.OrdinalIgnoreCase))
+                    string.Equals(monitor.ProfileStorageKey, primaryID, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(monitor.Id, primaryID, StringComparison.OrdinalIgnoreCase))
                 ?? includedMonitors.FirstOrDefault();
 
             return includedMonitors
@@ -208,6 +229,11 @@ public sealed class ProfileExecutor
     {
         var errors = new List<string>();
         var actions = ResolveWindowsActions(profile, monitors);
+        if (profile.CoordinationMode == ProfileCoordinationMode.Restore)
+        {
+            await RecoverActiveBehaviorsAsync(actions, errors);
+            return errors;
+        }
         var preSwitchTopologyErrors = new List<string>();
         ApplyActiveBehaviors(actions, preSwitchTopologyErrors);
 

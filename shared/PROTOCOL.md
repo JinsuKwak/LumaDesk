@@ -36,6 +36,10 @@ display-number and OS-local identifier changes.
 External profiles deliberately skip the peer phases. They apply the initiating
 host's safe pre-switch topology, send DDC, then report `sent-unverified`.
 
+Restore Layout profiles are never serialized onto this protocol. They store a
+host-local monitor set and Primary, then restore the local Primary/Extended
+topology without DDC input commands or peer discovery/transactions.
+
 Messages are newline-delimited UTF-8 JSON over TCP. Discovery uses a short LAN
 multicast probe at launch, on demand, or after the user requests Rescan. A peer
 answers once and the endpoint is cached for direct commands. As soon as either

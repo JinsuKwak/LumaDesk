@@ -39,9 +39,15 @@
       "properties": {
         "id": { "type": "string", "format": "uuid" },
         "name": { "type": "string", "minLength": 1 },
-        "coordinationMode": { "enum": ["managed", "self", "external"] },
+        "coordinationMode": { "enum": ["managed", "self", "restore", "external"] },
         "selfPrimaryMonitorID": { "type": "string" },
         "peerPrimaryMonitorID": { "type": "string" },
+        "layoutPrimaryMonitorID": { "type": "string" },
+        "layoutMonitorIDs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        },
         "inputAssignments": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 0, "maximum": 65535 }

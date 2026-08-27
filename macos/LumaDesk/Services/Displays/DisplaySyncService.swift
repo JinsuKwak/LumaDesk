@@ -308,7 +308,7 @@ final class DisplaySyncService {
         }
     }
 
-    private func reconcileDisplays() async {
+    private func reconcileDisplays(readInputs: Bool = true) async {
         let discoveredDisplays = await brightnessBackend.discoverExternalDisplays()
         let now = Date()
         let connectedIDs = Set(discoveredDisplays.map(\.id))
@@ -347,10 +347,12 @@ final class DisplaySyncService {
             // Never keep Dictionary.subscript's modify access alive across an
             // await. The independent 1 Hz input poll can otherwise re-enter this
             // actor and mutate `sessions`, invalidating the dictionary storage.
-            let currentInputCode = await inputSwitchingService.readCurrentStandardInput(on: target)
-            if var latestSession = sessions[target.id], latestSession.isConnected {
-                latestSession.currentInputCode = currentInputCode
-                sessions[target.id] = latestSession
+            if readInputs {
+                let currentInputCode = await inputSwitchingService.readCurrentStandardInput(on: target)
+                if var latestSession = sessions[target.id], latestSession.isConnected {
+                    latestSession.currentInputCode = currentInputCode
+                    sessions[target.id] = latestSession
+                }
             }
         }
 
@@ -376,13 +378,27 @@ final class DisplaySyncService {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
 
-        await reconcileDisplays()
-
         guard let profileID,
               let profile = settings.switchingProfiles.first(where: { $0.id == profileID })
         else {
             statusHandler?("Set a default profile")
             switchAwayInFlight = false
+            return
+        }
+
+        await reconcileDisplays(readInputs: profile.coordinationMode != .restore)
+
+        if profile.coordinationMode == .restore {
+            activeProfileID = profile.id
+            activeRemoteProfile = nil
+            let restored = applyTopology(profile)
+            statusHandler?(restored ? "\(profile.name) restored" : "\(profile.name): no matching displays")
+            if restored { lastSuccessfulLocalProfileID = profile.id }
+            switchAwayInFlight = false
+            if settings.isEnabled, pendingRescan {
+                pendingRescan = false
+                requestRescan(delay: 1)
+            }
             return
         }
 
@@ -507,6 +523,9 @@ final class DisplaySyncService {
     private func restorePreviousProfile(_ profile: DisplaySwitchingProfile) async -> [String] {
         activeProfileID = profile.id
         activeRemoteProfile = nil
+        if profile.coordinationMode == .restore {
+            return applyTopology(profile) ? [] : ["Local layout restore failed"]
+        }
         applyTopology(profile)
         let result = await switchInputs(for: profile)
         if result.successful {
@@ -535,13 +554,25 @@ final class DisplaySyncService {
         }
         var localProfile = profile
         localProfile.macDisplayBehaviors = [:]
-        if profile.coordinationMode == .thisDevice, !profile.inputAssignments.isEmpty {
+        if profile.coordinationMode == .thisDevice || profile.coordinationMode == .restore {
             let included = sessions.values
-                .filter { profileValue(profile.inputAssignments, for: $0) != nil }
+                .filter { session in
+                    if profile.coordinationMode == .restore {
+                        let storageKey = profileStorageKey(for: session)
+                        return profile.layoutMonitorIDs.contains {
+                            $0.caseInsensitiveCompare(storageKey) == .orderedSame ||
+                                $0.caseInsensitiveCompare(session.id) == .orderedSame
+                        }
+                    }
+                    return profileValue(profile.inputAssignments, for: session) != nil
+                }
                 .sorted { $0.displayNumber < $1.displayNumber }
             let primary = included.first(where: {
-                profileStorageKey(for: $0).caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame ||
-                    $0.id.caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame
+                let primaryID = profile.coordinationMode == .restore
+                    ? profile.layoutPrimaryMonitorID
+                    : profile.selfPrimaryMonitorID
+                return profileStorageKey(for: $0).caseInsensitiveCompare(primaryID) == .orderedSame ||
+                    $0.id.caseInsensitiveCompare(primaryID) == .orderedSame
             }) ?? included.first
             for session in included {
                 localProfile.macDisplayBehaviors[session.id] = session.id == primary?.id ? .primary : .extended

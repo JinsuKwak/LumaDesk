@@ -693,7 +693,7 @@ struct SettingsRootView: View {
                             !hasUnsavedDisplaySwitchChanges ||
                                 !areProfileNamesValid ||
                                 !arePairingIDsValid ||
-                                !areSelfPrimarySelectionsValid
+                                !areAutomaticPrimarySelectionsValid
                         )
                     }
                     .padding(.top, 4)
@@ -728,8 +728,8 @@ struct SettingsRootView: View {
                         .foregroundStyle(.red)
                 }
 
-                if !areSelfPrimarySelectionsValid {
-                    Text("This Device primaries must both be enabled monitors.")
+                if !areAutomaticPrimarySelectionsValid {
+                    Text("This Device and Restore Layout primaries must use enabled monitors.")
                         .font(.footnote)
                         .foregroundStyle(.red)
                 }
@@ -1056,6 +1056,14 @@ struct SettingsRootView: View {
             if switchingProfileDrafts[index].peerPrimaryMonitorID.caseInsensitiveCompare(oldKey) == .orderedSame {
                 switchingProfileDrafts[index].peerPrimaryMonitorID = newKey
             }
+            if switchingProfileDrafts[index].layoutPrimaryMonitorID.caseInsensitiveCompare(oldKey) == .orderedSame {
+                switchingProfileDrafts[index].layoutPrimaryMonitorID = newKey
+            }
+            if let layoutIndex = switchingProfileDrafts[index].layoutMonitorIDs.firstIndex(where: {
+                $0.caseInsensitiveCompare(oldKey) == .orderedSame
+            }) {
+                switchingProfileDrafts[index].layoutMonitorIDs[layoutIndex] = newKey
+            }
         }
     }
 
@@ -1130,6 +1138,11 @@ struct SettingsRootView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                } else if switchingProfileDrafts[index].coordinationMode == .restore {
+                    Text("Local Primary + Extended only")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 } else {
                     Text("One-way DDC")
                         .font(.caption)
@@ -1151,17 +1164,30 @@ struct SettingsRootView: View {
             }
             .padding(.leading, 25)
 
-            if switchingProfileDrafts[index].coordinationMode == .thisDevice {
+            if switchingProfileDrafts[index].coordinationMode == .thisDevice ||
+                switchingProfileDrafts[index].coordinationMode == .restore {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 7) {
-                        Text("This Mac primary")
+                        Text(switchingProfileDrafts[index].coordinationMode == .restore
+                            ? "Primary"
+                            : "This Mac primary")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .frame(width: 92, alignment: .trailing)
 
                         Picker("", selection: Binding(
-                            get: { switchingProfileDrafts[index].selfPrimaryMonitorID },
-                            set: { switchingProfileDrafts[index].selfPrimaryMonitorID = $0 }
+                            get: {
+                                switchingProfileDrafts[index].coordinationMode == .restore
+                                    ? switchingProfileDrafts[index].layoutPrimaryMonitorID
+                                    : switchingProfileDrafts[index].selfPrimaryMonitorID
+                            },
+                            set: { value in
+                                if switchingProfileDrafts[index].coordinationMode == .restore {
+                                    switchingProfileDrafts[index].layoutPrimaryMonitorID = value
+                                } else {
+                                    switchingProfileDrafts[index].selfPrimaryMonitorID = value
+                                }
+                            }
                         )) {
                             Text("Choose").tag("")
                             ForEach(appState.displaySyncSnapshots) { snapshot in
@@ -1176,32 +1202,34 @@ struct SettingsRootView: View {
                         Spacer(minLength: 8)
                     }
 
-                    HStack(spacing: 7) {
-                        Text("Peer fallback")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 92, alignment: .trailing)
+                    if switchingProfileDrafts[index].coordinationMode == .thisDevice {
+                        HStack(spacing: 7) {
+                            Text("Peer fallback")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 92, alignment: .trailing)
 
-                        Picker("", selection: Binding(
-                            get: { switchingProfileDrafts[index].peerPrimaryMonitorID },
-                            set: { switchingProfileDrafts[index].peerPrimaryMonitorID = $0 }
-                        )) {
-                            Text("Choose").tag("")
-                            ForEach(appState.displaySyncSnapshots) { snapshot in
-                                Text(displayLabel(for: snapshot)).tag(profileStorageKey(for: snapshot))
+                            Picker("", selection: Binding(
+                                get: { switchingProfileDrafts[index].peerPrimaryMonitorID },
+                                set: { switchingProfileDrafts[index].peerPrimaryMonitorID = $0 }
+                            )) {
+                                Text("Choose").tag("")
+                                ForEach(appState.displaySyncSnapshots) { snapshot in
+                                    Text(displayLabel(for: snapshot)).tag(profileStorageKey(for: snapshot))
+                                }
                             }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .controlSize(.small)
+                            .frame(width: 170)
+
+                            Text("Keeps one recoverable peer desktop path.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+
+                            Spacer(minLength: 8)
                         }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .controlSize(.small)
-                        .frame(width: 170)
-
-                        Text("Keeps one recoverable peer desktop path.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 8)
                     }
                 }
                 .padding(.leading, 25)
@@ -1227,18 +1255,28 @@ struct SettingsRootView: View {
 
                         Spacer(minLength: 8)
 
-                        labeledHexField(
-                            "Input",
-                            value: profileInputBinding(profileIndex: index, displayID: profileKey),
-                            width: 58
-                        )
-                        .disabled(switchingProfileDrafts[index].inputAssignments[profileKey] == nil)
-                        .opacity(switchingProfileDrafts[index].inputAssignments[profileKey] == nil ? 0.45 : 1)
+                        if switchingProfileDrafts[index].coordinationMode != .restore {
+                            labeledHexField(
+                                "Input",
+                                value: profileInputBinding(profileIndex: index, displayID: profileKey),
+                                width: 58
+                            )
+                            .disabled(switchingProfileDrafts[index].inputAssignments[profileKey] == nil)
+                            .opacity(switchingProfileDrafts[index].inputAssignments[profileKey] == nil ? 0.45 : 1)
+                        }
                     }
 
                     if switchingProfileDrafts[index].coordinationMode == .thisDevice {
                         HStack {
                             Text("This Mac uses Primary/Extended · the peer keeps its fallback Primary and hands off the rest")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 8)
+                        }
+                        .padding(.leading, 25)
+                    } else if switchingProfileDrafts[index].coordinationMode == .restore {
+                        HStack {
+                            Text("Restores Primary/Extended on this Mac · no DDC or LAN")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             Spacer(minLength: 8)
@@ -1287,18 +1325,26 @@ struct SettingsRootView: View {
         return !names.contains(where: \.isEmpty) && Set(names).count == names.count
     }
 
-    private var areSelfPrimarySelectionsValid: Bool {
+    private var areAutomaticPrimarySelectionsValid: Bool {
         switchingProfileDrafts.allSatisfy { profile in
-            guard profile.coordinationMode == .thisDevice,
-                  !profile.inputAssignments.isEmpty
-            else { return true }
-            let selfPrimaryIsIncluded = profile.inputAssignments.keys.contains {
-                $0.caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame
+            if profile.coordinationMode == .thisDevice {
+                guard !profile.inputAssignments.isEmpty else { return true }
+                let selfPrimaryIsIncluded = profile.inputAssignments.keys.contains {
+                    $0.caseInsensitiveCompare(profile.selfPrimaryMonitorID) == .orderedSame
+                }
+                let peerPrimaryIsIncluded = profile.inputAssignments.keys.contains {
+                    $0.caseInsensitiveCompare(profile.peerPrimaryMonitorID) == .orderedSame
+                }
+                return selfPrimaryIsIncluded && peerPrimaryIsIncluded
             }
-            let peerPrimaryIsIncluded = profile.inputAssignments.keys.contains {
-                $0.caseInsensitiveCompare(profile.peerPrimaryMonitorID) == .orderedSame
+
+            if profile.coordinationMode == .restore {
+                return !profile.layoutMonitorIDs.isEmpty && profile.layoutMonitorIDs.contains {
+                    $0.caseInsensitiveCompare(profile.layoutPrimaryMonitorID) == .orderedSame
+                }
             }
-            return selfPrimaryIsIncluded && peerPrimaryIsIncluded
+
+            return true
         }
     }
 
@@ -1320,8 +1366,37 @@ struct SettingsRootView: View {
 
     private func profileAssignmentEnabledBinding(profileIndex: Int, displayID: String) -> Binding<Bool> {
         Binding(
-            get: { switchingProfileDrafts[profileIndex].inputAssignments[displayID] != nil },
+            get: {
+                if switchingProfileDrafts[profileIndex].coordinationMode == .restore {
+                    return switchingProfileDrafts[profileIndex].layoutMonitorIDs.contains {
+                        $0.caseInsensitiveCompare(displayID) == .orderedSame
+                    }
+                }
+                return switchingProfileDrafts[profileIndex].inputAssignments[displayID] != nil
+            },
             set: { enabled in
+                if switchingProfileDrafts[profileIndex].coordinationMode == .restore {
+                    if enabled {
+                        if !switchingProfileDrafts[profileIndex].layoutMonitorIDs.contains(where: {
+                            $0.caseInsensitiveCompare(displayID) == .orderedSame
+                        }) {
+                            switchingProfileDrafts[profileIndex].layoutMonitorIDs.append(displayID)
+                        }
+                        if switchingProfileDrafts[profileIndex].layoutPrimaryMonitorID.isEmpty {
+                            switchingProfileDrafts[profileIndex].layoutPrimaryMonitorID = displayID
+                        }
+                    } else {
+                        switchingProfileDrafts[profileIndex].layoutMonitorIDs.removeAll {
+                            $0.caseInsensitiveCompare(displayID) == .orderedSame
+                        }
+                        if switchingProfileDrafts[profileIndex].layoutPrimaryMonitorID.caseInsensitiveCompare(displayID) == .orderedSame {
+                            switchingProfileDrafts[profileIndex].layoutPrimaryMonitorID = switchingProfileDrafts[profileIndex]
+                                .layoutMonitorIDs.sorted().first ?? ""
+                        }
+                    }
+                    return
+                }
+
                 if enabled {
                     switchingProfileDrafts[profileIndex].inputAssignments[displayID] = DisplayInputSource.displayPort1.rawValue
                     if switchingProfileDrafts[profileIndex].coordinationMode == .thisDevice,
