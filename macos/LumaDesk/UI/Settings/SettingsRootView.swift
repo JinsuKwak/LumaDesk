@@ -1276,7 +1276,7 @@ struct SettingsRootView: View {
                         .padding(.leading, 25)
                     } else if switchingProfileDrafts[index].coordinationMode == .restore {
                         HStack {
-                            Text("Restores Primary/Extended on this Mac · no DDC or LAN")
+                            Text("Restores Primary/Extended and remembered positions · no DDC or LAN")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                             Spacer(minLength: 8)

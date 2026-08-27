@@ -11,6 +11,7 @@ shared/    profile schema and authenticated LAN protocol
 Managed profiles coordinate Mac and Windows directly over the local network with multicast discovery, HMAC-authenticated TCP commands, and a prepare/commit transaction. External profiles (Jetson, consoles, or any renamed target) send DDC unilaterally and never require a peer app.
 
 Restore Layout profiles are local recovery actions. They choose one assigned monitor as Primary and restore the remaining assigned monitors as Extended without sending DDC input commands or contacting a LAN peer.
+On macOS, LumaDesk also remembers the Primary and relative coordinates for each active display UUID set before Handed Off or mirroring, then restores that arrangement when the same display set returns.
 
 Both clients offer System, Light, and Dark appearance modes while retaining
 native translucent materials. Profiles are available from the macOS menu bar or

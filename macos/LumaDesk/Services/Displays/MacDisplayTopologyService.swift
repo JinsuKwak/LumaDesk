@@ -9,7 +9,20 @@ final class MacDisplayTopologyService {
         case failed(CGError)
     }
 
+    private let defaults: UserDefaults
+    private let layoutStorageKey = "LumaDesk.DisplayLayouts.v1"
+    private var savedLayouts: [String: SavedDisplayLayout]
     private var isApplying = false
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        if let data = defaults.data(forKey: layoutStorageKey),
+           let layouts = try? JSONDecoder().decode([String: SavedDisplayLayout].self, from: data) {
+            savedLayouts = layouts
+        } else {
+            savedLayouts = [:]
+        }
+    }
 
     func apply(
         profile: DisplaySwitchingProfile,
@@ -25,6 +38,13 @@ final class MacDisplayTopologyService {
         }
 
         guard !behaviors.isEmpty else { return .noMatchingDisplays }
+
+        let foldsDesktop = behaviors.contains { _, behavior in
+            behavior == .mirrorPrimary || behavior == .handedOff
+        }
+        if foldsDesktop {
+            captureCurrentExtendedLayout()
+        }
 
         let handedOffIDs = Set(behaviors.compactMap { $0.1 == .handedOff ? $0.0 : nil })
         let explicitPrimary = behaviors.first(where: { $0.1 == .primary })?.0
@@ -47,7 +67,20 @@ final class MacDisplayTopologyService {
             CGConfigureDisplayMirrorOfDisplay(configuration, displayID, kCGNullDirectDisplay)
         }
 
-        if primaryID != currentPrimary {
+        let savedLayout = foldsDesktop ? nil : savedLayout(for: displays)
+        if let savedLayout,
+           let primaryUUID = displays.first(where: { $0.id == primaryID })?.uuid,
+           let primaryOrigin = savedLayout.origins[primaryUUID] {
+            for display in displays where !handedOffIDs.contains(display.id) {
+                guard let origin = savedLayout.origins[display.uuid] else { continue }
+                CGConfigureDisplayOrigin(
+                    configuration,
+                    display.id,
+                    origin.x - primaryOrigin.x,
+                    origin.y - primaryOrigin.y
+                )
+            }
+        } else if primaryID != currentPrimary {
             let primaryOrigin = CGDisplayBounds(primaryID).origin
             for display in displays where !handedOffIDs.contains(display.id) {
                 let bounds = CGDisplayBounds(display.id)
@@ -66,6 +99,61 @@ final class MacDisplayTopologyService {
         return completeError == .success ? .applied : .failed(completeError)
     }
 
+    /// Mirroring collapses independent display coordinates. Preserve the last
+    /// healthy extended arrangement before a Handed Off/Mirror profile does so.
+    /// The active UUID set is part of the key, keeping docked, undocked, and
+    /// clamshell layouts independent from one another.
+    private func captureCurrentExtendedLayout() {
+        let displays = activeDisplays()
+        guard !displays.isEmpty,
+              displays.allSatisfy({ CGDisplayMirrorsDisplay($0.id) == kCGNullDirectDisplay })
+        else { return }
+
+        let primaryID = CGMainDisplayID()
+        guard let primary = displays.first(where: { $0.id == primaryID }) else { return }
+
+        let primaryOrigin = primary.bounds.origin
+        let origins = Dictionary(uniqueKeysWithValues: displays.map { display in
+            let x = Int32((display.bounds.origin.x - primaryOrigin.x).rounded())
+            let y = Int32((display.bounds.origin.y - primaryOrigin.y).rounded())
+            return (display.uuid, SavedDisplayOrigin(x: x, y: y))
+        })
+        let key = layoutKey(for: displays)
+        savedLayouts[key] = SavedDisplayLayout(
+            primaryUUID: primary.uuid,
+            origins: origins,
+            capturedAt: Date()
+        )
+
+        if savedLayouts.count > 24 {
+            let staleKeys = savedLayouts
+                .sorted { $0.value.capturedAt < $1.value.capturedAt }
+                .prefix(savedLayouts.count - 24)
+                .map(\.key)
+            for staleKey in staleKeys {
+                savedLayouts.removeValue(forKey: staleKey)
+            }
+        }
+
+        guard let data = try? JSONEncoder().encode(savedLayouts) else { return }
+        defaults.set(data, forKey: layoutStorageKey)
+    }
+
+    private func savedLayout(for displays: [DisplayDescriptor]) -> SavedDisplayLayout? {
+        let active = displays.filter { CGDisplayIsActive($0.id) != 0 }
+        guard !active.isEmpty else { return nil }
+        return savedLayouts[layoutKey(for: active)]
+    }
+
+    private func activeDisplays() -> [DisplayDescriptor] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+
+        var displayIDs = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displayIDs, &count) == .success else { return [] }
+        return descriptors(for: Array(displayIDs.prefix(Int(count))))
+    }
+
     private func onlineDisplays() -> [DisplayDescriptor] {
         var count: UInt32 = 0
         guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
@@ -73,7 +161,11 @@ final class MacDisplayTopologyService {
         var displayIDs = [CGDirectDisplayID](repeating: 0, count: Int(count))
         guard CGGetOnlineDisplayList(count, &displayIDs, &count) == .success else { return [] }
 
-        return displayIDs.prefix(Int(count)).map { displayID in
+        return descriptors(for: Array(displayIDs.prefix(Int(count))))
+    }
+
+    private func descriptors(for displayIDs: [CGDirectDisplayID]) -> [DisplayDescriptor] {
+        displayIDs.map { displayID in
             let uuid = CGDisplayCreateUUIDFromDisplayID(displayID).takeRetainedValue()
             let uuidText = CFUUIDCreateString(nil, uuid) as String
             return DisplayDescriptor(
@@ -83,6 +175,10 @@ final class MacDisplayTopologyService {
                 bounds: CGDisplayBounds(displayID)
             )
         }
+    }
+
+    private func layoutKey(for displays: [DisplayDescriptor]) -> String {
+        displays.map(\.uuid).sorted().joined(separator: "|")
     }
 
     private func match(
@@ -126,4 +222,15 @@ private struct DisplayDescriptor {
     var uuid: String
     var isBuiltIn: Bool
     var bounds: CGRect
+}
+
+private struct SavedDisplayLayout: Codable {
+    var primaryUUID: String
+    var origins: [String: SavedDisplayOrigin]
+    var capturedAt: Date
+}
+
+private struct SavedDisplayOrigin: Codable {
+    var x: Int32
+    var y: Int32
 }
