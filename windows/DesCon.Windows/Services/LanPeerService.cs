@@ -21,6 +21,8 @@ public sealed class LanPeerService : IDisposable
     private readonly ConcurrentDictionary<Guid, WireProfile> _pending = [];
     private readonly ConcurrentDictionary<string, DateTimeOffset> _nonces = [];
     private readonly ConcurrentDictionary<Guid, Peer> _peers = [];
+    private readonly ConcurrentDictionary<Guid, byte> _helloInFlight = [];
+    private readonly ConcurrentDictionary<Guid, byte> _helloConfirmed = [];
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly JsonSerializerOptions _json = new()
     {
@@ -128,6 +130,8 @@ public sealed class LanPeerService : IDisposable
         _discoveryReceiver?.Dispose();
         _discoveryReceiver = null;
         _peers.Clear();
+        _helloInFlight.Clear();
+        _helloConfirmed.Clear();
         _pending.Clear();
         stop?.Dispose();
         PublishStatus("LAN peer off");
@@ -159,8 +163,9 @@ public sealed class LanPeerService : IDisposable
             using (var reader = new StreamReader(stream, Encoding.UTF8, leaveOpen: true))
             using (var writer = new StreamWriter(stream, new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true })
             {
+                var remoteAddress = (client.Client.RemoteEndPoint as IPEndPoint)?.Address;
                 var line = await reader.ReadLineAsync(cancellationToken);
-                var response = await Process(line);
+                var response = await Process(line, remoteAddress);
                 await writer.WriteLineAsync(CreateEnvelope("response", JsonSerializer.SerializeToUtf8Bytes(response, _json)));
             }
         }
@@ -169,7 +174,7 @@ public sealed class LanPeerService : IDisposable
         catch (SocketException) { }
     }
 
-    private async Task<PeerResponse> Process(string? line)
+    private async Task<PeerResponse> Process(string? line, IPAddress? remoteAddress)
     {
         if (!_settings().Network.Enabled) return new PeerResponse(false, "LAN peer communication is disabled.");
         if (string.IsNullOrWhiteSpace(line)) return new PeerResponse(false, "Empty request.");
@@ -183,6 +188,23 @@ public sealed class LanPeerService : IDisposable
             var payload = Convert.FromBase64String(envelope.Payload);
             switch (envelope.Type)
             {
+                case "hello":
+                    var hello = JsonSerializer.Deserialize<DiscoveryAnnouncement>(payload, _json);
+                    if (hello is null ||
+                        hello.InstanceID == _instanceID ||
+                        hello.Platform != "macOS" ||
+                        remoteAddress is null ||
+                        hello.CommandPort is < 1 or > 65535)
+                        return new PeerResponse(false, "Invalid Mac hello.");
+                    _peers[hello.InstanceID] = new Peer(
+                        hello.InstanceID,
+                        hello.DeviceName,
+                        remoteAddress,
+                        hello.CommandPort,
+                        DateTimeOffset.UtcNow);
+                    _helloConfirmed[hello.InstanceID] = 0;
+                    PublishStatus($"Connected to {hello.DeviceName}");
+                    return new PeerResponse(true, "Hello");
                 case "prepare":
                     var prepare = JsonSerializer.Deserialize<PreparePayload>(payload, _json);
                     if (prepare is null) return new PeerResponse(false, "Invalid profile payload.");
@@ -271,15 +293,22 @@ public sealed class LanPeerService : IDisposable
             while (!cancellationToken.IsCancellationRequested)
             {
                 var packet = await _discoveryReceiver.ReceiveAsync(cancellationToken);
-                var announcement = JsonSerializer.Deserialize<DiscoveryAnnouncement>(packet.Buffer, _json);
-                if (announcement is null || announcement.InstanceID == _instanceID || announcement.Platform != "macOS") continue;
-                _peers[announcement.InstanceID] = new Peer(
+                DiscoveryAnnouncement? announcement;
+                try { announcement = JsonSerializer.Deserialize<DiscoveryAnnouncement>(packet.Buffer, _json); }
+                catch (JsonException) { continue; }
+                if (announcement is null ||
+                    announcement.InstanceID == _instanceID ||
+                    announcement.Platform != "macOS" ||
+                    announcement.CommandPort is < 1 or > 65535) continue;
+                var peer = new Peer(
                     announcement.InstanceID,
                     announcement.DeviceName,
                     packet.RemoteEndPoint.Address,
                     announcement.CommandPort,
                     DateTimeOffset.UtcNow);
+                _peers[announcement.InstanceID] = peer;
                 PublishStatus($"Connected to {announcement.DeviceName}");
+                _ = SynchronizePeer(peer, cancellationToken);
                 if (string.Equals(announcement.Kind, "probe", StringComparison.OrdinalIgnoreCase))
                     _ = SendDiscoveryAnnouncement("presence", cancellationToken);
             }
@@ -314,7 +343,12 @@ public sealed class LanPeerService : IDisposable
         try
         {
             if (!clearExisting && BestPeer() is not null) return;
-            if (clearExisting) _peers.Clear();
+            if (clearExisting)
+            {
+                _peers.Clear();
+                _helloInFlight.Clear();
+                _helloConfirmed.Clear();
+            }
             PublishStatus("Searching LAN");
             for (var attempt = 0; attempt < 3; attempt++)
             {
@@ -364,6 +398,42 @@ public sealed class LanPeerService : IDisposable
         using var fallbackSender = new UdpClient(AddressFamily.InterNetwork);
         fallbackSender.MulticastLoopback = false;
         await fallbackSender.SendAsync(data, endpoint, cancellationToken);
+    }
+
+    private async Task SynchronizePeer(Peer peer, CancellationToken cancellationToken)
+    {
+        if (_settings().Network.SharedKey.Length < 8 ||
+            _helloConfirmed.ContainsKey(peer.ID) ||
+            !_helloInFlight.TryAdd(peer.ID, 0)) return;
+
+        try
+        {
+            var hello = new DiscoveryAnnouncement(
+                2,
+                _instanceID,
+                _settings().Network.DeviceName,
+                "windows",
+                _settings().Network.CommandPort,
+                "direct");
+            var payload = JsonSerializer.SerializeToUtf8Bytes(hello, _json);
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                var response = await Send(peer, "hello", payload, cancellationToken);
+                if (response.Ok)
+                {
+                    _helloConfirmed[peer.ID] = 0;
+                    return;
+                }
+                if (attempt == 0) await Task.Delay(350, cancellationToken);
+            }
+            if (!_helloConfirmed.ContainsKey(peer.ID))
+                PublishStatus($"Found {peer.DeviceName} · reverse connection failed");
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            _helloInFlight.TryRemove(peer.ID, out _);
+        }
     }
 
     private static IReadOnlyList<IPAddress> ActiveMulticastIPv4Addresses()

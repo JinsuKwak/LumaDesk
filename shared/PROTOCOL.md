@@ -38,7 +38,11 @@ host's safe pre-switch topology, send DDC, then report `sent-unverified`.
 
 Messages are newline-delimited UTF-8 JSON over TCP. Discovery uses a short LAN
 multicast probe at launch, on demand, or after the user requests Rescan. A peer
-answers once and the endpoint is cached for direct commands; there is no periodic
+answers once and the endpoint is cached for direct commands. As soon as either
+side receives a multicast announcement it sends an authenticated direct TCP
+`hello`; the receiver registers the caller too, so one-way multicast delivery
+still produces a symmetric peer connection. Failed hellos may be retried by the
+bounded handshake retry or the next manual Rescan. There is no periodic
 background announcement. Commands are never broadcast. Production messages carry an HMAC
 SHA-256 signature over `version|id|timestamp|nonce|type|payload` and peers reject
 timestamps outside 30 seconds or repeated nonces.

@@ -31,6 +31,8 @@ final class LANPeerService {
     private var multicastGroup: NWConnectionGroup?
     private var discoveryTask: Task<Void, Never>?
     private var peers: [UUID: Peer] = [:]
+    private var helloInFlight: Set<UUID> = []
+    private var helloConfirmed: Set<UUID> = []
     private var pendingProfiles: [UUID: WireProfile] = [:]
     private var seenNonces: [String: Date] = [:]
 
@@ -101,6 +103,8 @@ final class LANPeerService {
 
         discoveryTask?.cancel()
         peers.removeAll()
+        helloInFlight.removeAll()
+        helloConfirmed.removeAll()
         statusHandler?("Searching LAN")
         discoveryTask = Task { [weak self] in
             guard let self else { return }
@@ -122,6 +126,8 @@ final class LANPeerService {
         multicastGroup?.cancel()
         multicastGroup = nil
         peers.removeAll()
+        helloInFlight.removeAll()
+        helloConfirmed.removeAll()
     }
 
     private func startTCPListener() {
@@ -151,12 +157,18 @@ final class LANPeerService {
     }
 
     private func handle(connection: NWConnection) {
+        let remoteHost: NWEndpoint.Host?
+        if case .hostPort(let host, _) = connection.endpoint {
+            remoteHost = host
+        } else {
+            remoteHost = nil
+        }
         connection.start(queue: queue)
         receiveLine(connection: connection, accumulated: Data()) { [weak self] data in
             guard let self else { return }
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let response = await self.process(data: data)
+                let response = await self.process(data: data, remoteHost: remoteHost)
                 guard let responseData = try? self.encoder.encode(response),
                       let envelope = self.makeEnvelope(type: "response", payload: responseData),
                       var encoded = try? self.encoder.encode(envelope)
@@ -170,7 +182,7 @@ final class LANPeerService {
         }
     }
 
-    private func process(data: Data) async -> PeerResponse {
+    private func process(data: Data, remoteHost: NWEndpoint.Host?) async -> PeerResponse {
         guard settings.isEnabled else { return PeerResponse(ok: false, detail: "LAN peer communication is disabled.") }
         guard let envelope = try? decoder.decode(Envelope.self, from: data), verify(envelope) else {
             return PeerResponse(ok: false, detail: "Authentication failed.")
@@ -180,6 +192,26 @@ final class LANPeerService {
         }
 
         switch envelope.type {
+        case "hello":
+            guard let hello = try? decoder.decode(DiscoveryAnnouncement.self, from: payload),
+                  hello.instanceID != instanceID,
+                  hello.platform == "windows",
+                  let remoteHost,
+                  (1 ... 65_535).contains(hello.commandPort),
+                  let port = NWEndpoint.Port(rawValue: UInt16(hello.commandPort))
+            else {
+                return PeerResponse(ok: false, detail: "Invalid Windows hello.")
+            }
+            peers[hello.instanceID] = Peer(
+                id: hello.instanceID,
+                deviceName: hello.deviceName,
+                host: remoteHost,
+                port: port,
+                lastSeen: Date()
+            )
+            helloConfirmed.insert(hello.instanceID)
+            statusHandler?("Connected to \(hello.deviceName)")
+            return PeerResponse(ok: true, detail: "Hello")
         case "prepare":
             guard let prepare = try? decoder.decode(PreparePayload.self, from: payload) else {
                 return PeerResponse(ok: false, detail: "Invalid profile payload.")
@@ -244,17 +276,20 @@ final class LANPeerService {
         guard let announcement = try? decoder.decode(DiscoveryAnnouncement.self, from: data),
               announcement.instanceID != instanceID,
               announcement.platform == "windows",
+              (1 ... 65_535).contains(announcement.commandPort),
               let port = NWEndpoint.Port(rawValue: UInt16(announcement.commandPort))
         else { return }
 
-        peers[announcement.instanceID] = Peer(
+        let peer = Peer(
             id: announcement.instanceID,
             deviceName: announcement.deviceName,
             host: host,
             port: port,
             lastSeen: Date()
         )
+        peers[announcement.instanceID] = peer
         statusHandler?("Connected to \(announcement.deviceName)")
+        synchronizePeer(peer)
         if announcement.kind == "probe" {
             sendAnnouncement(kind: "presence")
         }
@@ -283,6 +318,41 @@ final class LANPeerService {
             )
         ) else { return }
         multicastGroup?.send(content: data) { _ in }
+    }
+
+    private func synchronizePeer(_ peer: Peer) {
+        guard settings.sharedKey.count >= 8,
+              !helloConfirmed.contains(peer.id),
+              !helloInFlight.contains(peer.id)
+        else { return }
+
+        helloInFlight.insert(peer.id)
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.helloInFlight.remove(peer.id) }
+            let hello = DiscoveryAnnouncement(
+                version: 2,
+                instanceID: self.instanceID,
+                deviceName: self.settings.deviceName,
+                platform: "macOS",
+                commandPort: Int(self.settings.commandPort),
+                kind: "direct"
+            )
+            guard let payload = try? self.encoder.encode(hello) else { return }
+            for attempt in 0 ..< 2 {
+                let response = await self.send(type: "hello", payload: payload, to: peer)
+                if response.ok {
+                    self.helloConfirmed.insert(peer.id)
+                    return
+                }
+                if attempt == 0 {
+                    try? await Task.sleep(nanoseconds: 350_000_000)
+                }
+            }
+            if !self.helloConfirmed.contains(peer.id) {
+                self.statusHandler?("Found \(peer.deviceName) · reverse connection failed")
+            }
+        }
     }
 
     private func send(type: String, payload: Data, to peer: Peer) async -> PeerResponse {
